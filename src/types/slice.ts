@@ -15,8 +15,45 @@ export interface SliceRecord {
   createdAt: string;
 }
 
+const ADMIN_MUTATION_HEADERS: Record<string, string> = {
+  'X-TabSlice-Admin': '1',
+};
+
+export async function fetchAdminSession(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/admin/session', {credentials: 'same-origin'});
+    if (!res.ok) return false;
+    const data = (await res.json()) as {authenticated?: boolean};
+    return Boolean(data.authenticated);
+  } catch {
+    return false;
+  }
+}
+
+export async function loginAdmin(password: string): Promise<void> {
+  const res = await fetch('/api/admin/login', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {'Content-Type': 'application/json', ...ADMIN_MUTATION_HEADERS},
+    body: JSON.stringify({password}),
+  });
+  const payload = (await res.json().catch(() => ({}))) as {error?: string};
+  if (!res.ok) {
+    throw new Error(payload.error || 'Anmeldung fehlgeschlagen.');
+  }
+}
+
+export async function logoutAdmin(): Promise<void> {
+  await fetch('/api/admin/logout', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: ADMIN_MUTATION_HEADERS,
+  });
+}
+
 export async function fetchSlices(): Promise<SliceRecord[]> {
-  const res = await fetch('/api/slices');
+  const res = await fetch('/api/slices', {credentials: 'same-origin'});
+  if (res.status === 401) return [];
   if (!res.ok) throw new Error('Slices konnten nicht geladen werden.');
   const data = (await res.json()) as {slices: SliceRecord[]};
   return data.slices || [];
@@ -36,13 +73,13 @@ export async function uploadSliceFile(params: {
   artist?: string;
   defaultLayout?: 'page' | 'horizontal';
   showFretboard?: boolean;
-  customId?: string;
 }): Promise<SliceRecord> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
     'X-File-Name': encodeURIComponent(params.file.name),
     'X-Layout': params.defaultLayout || 'page',
     'X-Fretboard': params.showFretboard ? '1' : '0',
+    ...ADMIN_MUTATION_HEADERS,
   };
   if (params.title?.trim()) {
     headers['X-Title'] = encodeURIComponent(params.title.trim());
@@ -50,12 +87,10 @@ export async function uploadSliceFile(params: {
   if (params.artist?.trim()) {
     headers['X-Artist'] = encodeURIComponent(params.artist.trim());
   }
-  if (params.customId?.trim()) {
-    headers['X-Custom-Id'] = encodeURIComponent(params.customId.trim());
-  }
 
   const res = await fetch('/api/slices/upload', {
     method: 'POST',
+    credentials: 'same-origin',
     headers,
     body: params.file,
   });
@@ -73,11 +108,11 @@ export async function createTexSlice(params: {
   artist?: string;
   defaultLayout?: 'page' | 'horizontal';
   showFretboard?: boolean;
-  customId?: string;
 }): Promise<SliceRecord> {
   const res = await fetch('/api/slices/tex', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    credentials: 'same-origin',
+    headers: {'Content-Type': 'application/json', ...ADMIN_MUTATION_HEADERS},
     body: JSON.stringify(params),
   });
   const payload = (await res.json()) as {slice?: SliceRecord; error?: string};
@@ -90,6 +125,8 @@ export async function createTexSlice(params: {
 export async function deleteSliceById(id: string): Promise<void> {
   const res = await fetch(`/api/slices/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+    credentials: 'same-origin',
+    headers: ADMIN_MUTATION_HEADERS,
   });
   if (!res.ok) {
     const payload = (await res.json().catch(() => ({}))) as {error?: string};

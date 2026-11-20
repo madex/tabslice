@@ -1,5 +1,6 @@
-import {Code2, Plus} from 'lucide-react';
+import {Code2, LogIn, LogOut, Plus} from 'lucide-react';
 import {useCallback, useEffect, useMemo, useState} from 'react';
+import {AdminLoginModal} from './components/AdminLoginModal';
 import {CreateSliceModal} from './components/CreateSliceModal';
 import {EmbedModal} from './components/EmbedModal';
 import {HostingGuide} from './components/HostingGuide';
@@ -11,12 +12,15 @@ import {
   SliceRecord,
   SoundFontPresetId,
   StaveModeParam,
+  fetchAdminSession,
   fetchSliceById,
   fetchSlices,
+  logoutAdmin,
 } from './types/slice';
 
 interface RouteConfig {
   embed: boolean;
+  admin: boolean;
   routeSliceId: string | null;
   fileUrl: string | null;
   demo: string;
@@ -46,6 +50,7 @@ function parseRouteConfig(): RouteConfig {
       : null;
 
   const embed = Boolean(embedMatch) || params.get('embed') === '1' || params.get('embed') === 'true';
+  const admin = pathname.replace(/\/+$/, '') === '/admin';
   const fileUrl = params.get('file');
   const demoParam = params.get('demo');
   const demo = DEMO_SCORES.some((d) => d.id === demoParam) ? demoParam! : 'ensemble';
@@ -87,6 +92,7 @@ function parseRouteConfig(): RouteConfig {
 
   return {
     embed,
+    admin,
     routeSliceId,
     fileUrl,
     demo,
@@ -111,6 +117,10 @@ export default function App() {
   const [activeSlice, setActiveSlice] = useState<SliceRecord | null>(null);
   const [sliceNotFound, setSliceNotFound] = useState<boolean>(false);
 
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [adminChecked, setAdminChecked] = useState<boolean>(false);
+  const [adminModalOpen, setAdminModalOpen] = useState<boolean>(false);
+
   const [activeView, setActiveView] = useState<'player' | 'library' | 'hosting'>('player');
   const [embedPreviewMode, setEmbedPreviewMode] = useState<boolean>(false);
   const [embedModalOpen, setEmbedModalOpen] = useState<boolean>(false);
@@ -133,9 +143,23 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    fetchAdminSession().then((authenticated) => {
+      if (cancelled) return;
+      setIsAdmin(authenticated);
+      setAdminChecked(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
 
     async function init() {
-      if (routeConfig.embed && routeConfig.routeSliceId) {
+      // A public slice link is resolved directly by its UUID. No library call
+      // and no authentication are needed.
+      if (routeConfig.routeSliceId) {
         try {
           const found = await fetchSliceById(routeConfig.routeSliceId);
           if (!cancelled) {
@@ -154,19 +178,22 @@ export default function App() {
         return;
       }
 
+      if (routeConfig.embed) {
+        setIsLoadingSlices(false);
+        return;
+      }
+
+      if (!adminChecked || !isAdmin) {
+        setIsLoadingSlices(false);
+        return;
+      }
+
       const list = await refreshSlices();
       if (cancelled) return;
 
-      if (routeConfig.routeSliceId) {
-        const match = list.find((s) => s.id === routeConfig.routeSliceId);
-        if (match) {
-          setActiveSlice(match);
-        } else {
-          setSliceNotFound(true);
-        }
-      } else if (!routeConfig.fileUrl && list.length > 0) {
-        // Default to Fingerstyle Bass Groove if present, otherwise first slice
-        const bass = list.find((s) => s.id === 'fingerstyle-bass-groove');
+      if (!routeConfig.fileUrl && list.length > 0) {
+        // Default to the bass demo if present, otherwise the newest slice.
+        const bass = list.find((s) => s.title.toLowerCase().includes('fingerstyle bass'));
         setActiveSlice(bass || list[0]);
       }
     }
@@ -175,7 +202,36 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [routeConfig, refreshSlices]);
+  }, [routeConfig, refreshSlices, adminChecked, isAdmin]);
+
+  useEffect(() => {
+    if (!adminChecked) return;
+    if (routeConfig.admin && !isAdmin) {
+      setAdminModalOpen(true);
+    }
+    if (routeConfig.admin && isAdmin) {
+      setActiveView('library');
+      void refreshSlices();
+    }
+  }, [routeConfig.admin, adminChecked, isAdmin, refreshSlices]);
+
+  const handleAdminSuccess = useCallback(() => {
+    setAdminModalOpen(false);
+    setIsAdmin(true);
+    setActiveView('library');
+    void refreshSlices();
+    if (routeConfig.admin) {
+      window.history.replaceState(null, '', '/');
+    }
+  }, [refreshSlices, routeConfig.admin]);
+
+  const handleLogout = useCallback(async () => {
+    await logoutAdmin();
+    setIsAdmin(false);
+    setSlices([]);
+    setAdminModalOpen(false);
+    setActiveView('player');
+  }, []);
 
   const handleSelectSlice = useCallback((slice: SliceRecord) => {
     setActiveSlice(slice);
@@ -284,29 +340,36 @@ export default function App() {
             Player
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveView('library')}
-            className={`transition-colors whitespace-nowrap shrink-0 cursor-pointer pb-0.5 border-b-2 ${
-              activeView === 'library'
-                ? 'text-zinc-950 border-blue-600'
-                : 'border-transparent hover:text-zinc-950'
-            }`}
-          >
-            Bibliothek ({slices.length})
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveView('library');
+                void refreshSlices();
+              }}
+              className={`transition-colors whitespace-nowrap shrink-0 cursor-pointer pb-0.5 border-b-2 ${
+                activeView === 'library'
+                  ? 'text-zinc-950 border-blue-600'
+                  : 'border-transparent hover:text-zinc-950'
+              }`}
+            >
+              Bibliothek ({slices.length})
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => setActiveView('hosting')}
-            className={`hidden md:inline-block transition-colors whitespace-nowrap shrink-0 cursor-pointer pb-0.5 border-b-2 ${
-              activeView === 'hosting'
-                ? 'text-zinc-950 border-blue-600'
-                : 'border-transparent hover:text-zinc-950'
-            }`}
-          >
-            Hosting
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setActiveView('hosting')}
+              className={`hidden md:inline-block transition-colors whitespace-nowrap shrink-0 cursor-pointer pb-0.5 border-b-2 ${
+                activeView === 'hosting'
+                  ? 'text-zinc-950 border-blue-600'
+                  : 'border-transparent hover:text-zinc-950'
+              }`}
+            >
+              Hosting &amp; Konfiguration
+            </button>
+          )}
 
           <button
             type="button"
@@ -321,23 +384,45 @@ export default function App() {
           </button>
         </nav>
 
-        <div className="flex items-center shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setPendingPublishFile(null);
-              setCreateModalOpen(true);
-            }}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Slice erstellen
-          </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {isAdmin ? (
+            <>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-zinc-600 hover:text-zinc-900 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                title="Admin-Sitzung beenden"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Abmelden
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingPublishFile(null);
+                  setCreateModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Slice erstellen
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAdminModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-zinc-600 bg-white border border-zinc-200 hover:bg-zinc-50 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              Admin
+            </button>
+          )}
         </div>
       </header>
 
       {/* Main Content Stage */}
-      {activeView === 'library' ? (
+      {activeView === 'library' && isAdmin ? (
         <SliceLibrary
           slices={slices}
           activeSliceId={activeSlice?.id ?? null}
@@ -355,7 +440,7 @@ export default function App() {
           onSliceUploaded={handleSliceCreated}
           onSliceDeleted={handleSliceDeleted}
         />
-      ) : activeView === 'hosting' ? (
+      ) : activeView === 'hosting' && isAdmin ? (
         <HostingGuide />
       ) : (
         <main
@@ -410,10 +495,14 @@ export default function App() {
               activeSlice={activeSlice}
               initialFileUrl={routeConfig.fileUrl}
               demoId={routeConfig.demo}
-              onPublishLocalFile={(file) => {
-                setPendingPublishFile(file);
-                setCreateModalOpen(true);
-              }}
+              onPublishLocalFile={
+                isAdmin
+                  ? (file) => {
+                      setPendingPublishFile(file);
+                      setCreateModalOpen(true);
+                    }
+                  : undefined
+              }
               initialShowHeader={routeConfig.showHeader}
               initialLayout={routeConfig.layout}
               initialStaveProfile={routeConfig.stave}
@@ -432,7 +521,7 @@ export default function App() {
       )}
 
       <CreateSliceModal
-        isOpen={createModalOpen}
+        isOpen={createModalOpen && isAdmin}
         onClose={() => {
           setCreateModalOpen(false);
           setPendingPublishFile(null);
@@ -447,6 +536,12 @@ export default function App() {
         onClose={() => setEmbedModalOpen(false)}
         slices={slices}
         activeSlice={embedTargetSlice || activeSlice}
+      />
+
+      <AdminLoginModal
+        isOpen={adminModalOpen}
+        onClose={() => setAdminModalOpen(false)}
+        onSuccess={handleAdminSuccess}
       />
     </div>
   );

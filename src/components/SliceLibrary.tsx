@@ -115,7 +115,9 @@ export const SliceLibrary: React.FC<SliceLibraryProps> = ({
             </h1>
             <p className="text-sm text-zinc-600 mt-1">
               Lade Guitar-Pro-Dateien direkt hier hoch oder lege sie in den Server-Ordner{' '}
-              <code className="font-mono text-xs text-zinc-800">scores/</code> – jede Datei erhält automatisch einen kurzen Forum-Embed-Link.
+              <code className="font-mono text-xs text-zinc-800">scores/</code> – jede Datei erhält
+              automatisch einen nicht erratbaren UUID-Link. Die Bibliothek ist nur für
+              Administratoren sichtbar.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -205,7 +207,7 @@ export const SliceLibrary: React.FC<SliceLibraryProps> = ({
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Suchen nach Titel, Datei oder Kurzlink…"
+                placeholder="Suchen nach Titel, Datei oder UUID…"
                 className="w-full pl-8 pr-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-900 focus:outline-none focus:border-blue-600"
               />
             </div>
@@ -271,7 +273,9 @@ export const SliceLibrary: React.FC<SliceLibraryProps> = ({
                         </td>
 
                         <td className="py-3 px-3 font-mono text-[11px] text-zinc-600 whitespace-nowrap">
-                          /slices/{slice.id}/embed/
+                          <span title={`/slices/${slice.id}/embed/`}>
+                            /slices/{slice.id.slice(0, 8)}…/embed/
+                          </span>
                         </td>
 
                         <td className="py-3 px-3 text-right font-mono tabular-nums text-[11px] text-zinc-500 whitespace-nowrap">

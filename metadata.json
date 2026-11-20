@@ -1,6 +1,0 @@
-{
-  "name": "TabSlice",
-  "description": "Interaktiver Guitar-Pro- und alphaTab-Notenplayer im Soundslice-Stil mit Live-Griffbrett, Spurmixer, A-B-Loop und Iframe-Einbettung.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

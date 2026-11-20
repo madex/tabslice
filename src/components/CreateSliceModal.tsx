@@ -49,7 +49,6 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
   const [texContent, setTexContent] = useState<string>(STARTER_TEX);
   const [title, setTitle] = useState<string>('');
   const [artist, setArtist] = useState<string>('');
-  const [customSlug, setCustomSlug] = useState<string>('');
   const [defaultLayout, setDefaultLayout] = useState<'page' | 'horizontal'>('page');
   const [showFretboard, setShowFretboard] = useState<boolean>(false);
 
@@ -73,7 +72,6 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
       setError(null);
       setTitle('');
       setArtist('');
-      setCustomSlug('');
       setMode('file');
       setLinkShowHeader(true);
       setLinkMetronome(false);
@@ -112,7 +110,6 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
           artist,
           defaultLayout,
           showFretboard,
-          customId: customSlug,
         });
       } else {
         slice = await createTexSlice({
@@ -121,7 +118,6 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
           artist,
           defaultLayout,
           showFretboard,
-          customId: customSlug,
         });
       }
 
@@ -383,7 +379,6 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
                   setSelectedFile(null);
                   setTitle('');
                   setArtist('');
-                  setCustomSlug('');
                 }}
                 className="text-xs font-medium text-zinc-600 hover:text-zinc-900"
               >
@@ -529,19 +524,7 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1">
-                  Wunsch-Kurzlink <span className="text-zinc-400 font-normal">(optional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={customSlug}
-                  onChange={(e) => setCustomSlug(e.target.value)}
-                  placeholder="z. B. slap-uebung-1"
-                  className="w-full px-3 py-2 text-xs font-mono bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-900 focus:outline-none focus:border-blue-600"
-                />
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1">
                   Standard-Layout
