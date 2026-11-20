@@ -99,13 +99,21 @@ export async function deleteSliceById(id: string): Promise<void> {
 
 export function buildSliceEmbedUrl(
   sliceId: string,
-  options?: {layout?: 'page' | 'horizontal'; fretboard?: boolean; speed?: number},
+  options?: {
+    layout?: 'page' | 'horizontal';
+    fretboard?: boolean;
+    speed?: number;
+    soundFont?: 'sonivox' | 'fluidr3' | 'musescore';
+  },
 ): string {
   const base = `${window.location.origin}/slices/${encodeURIComponent(sliceId)}/embed/`;
   const params = new URLSearchParams();
   if (options?.layout === 'horizontal') params.set('layout', 'horizontal');
   if (options?.fretboard) params.set('fretboard', '1');
   if (options?.speed && options.speed !== 100) params.set('speed', String(options.speed));
+  if (options?.soundFont && options.soundFont !== 'sonivox') {
+    params.set('sf', options.soundFont);
+  }
   const qs = params.toString();
   return qs ? `${base}?${qs}` : base;
 }
@@ -121,11 +129,13 @@ export function buildSliceIframeCode(
     height?: string;
     layout?: 'page' | 'horizontal';
     fretboard?: boolean;
+    soundFont?: 'sonivox' | 'fluidr3' | 'musescore';
   },
 ): string {
   const url = buildSliceEmbedUrl(sliceId, {
     layout: options?.layout,
     fretboard: options?.fretboard,
+    soundFont: options?.soundFont,
   });
   const w = options?.width || '100%';
   const h = options?.height || '500';

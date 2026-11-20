@@ -15,6 +15,49 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 const DATA_DIR = path.resolve(__dirname, 'data', 'slices');
 const INDEX_FILE = path.join(DATA_DIR, 'index.json');
 const SCORES_DIR = path.resolve(__dirname, 'scores');
+const SOUNDFONTS_DIR = path.resolve(__dirname, 'data', 'soundfonts');
+
+interface SoundFontPreset {
+  id: string;
+  name: string;
+  description: string;
+  fileName: string;
+  sizeLabel: string;
+  localPath?: string;
+  remoteUrl?: string;
+}
+
+const SOUNDFONT_PRESETS: SoundFontPreset[] = [
+  {
+    id: 'sonivox',
+    name: 'Sonivox Standard',
+    description: 'Kompakt & sofort startklar',
+    fileName: 'sonivox.sf2',
+    sizeLabel: '1,3 MB',
+    localPath: path.resolve(__dirname, 'public', 'soundfont', 'sonivox.sf2'),
+  },
+  {
+    id: 'fluidr3',
+    name: 'FluidR3 GM (Studio)',
+    description: 'Warmer Fingerstyle-Bass, realistische Gitarren & Drums',
+    fileName: 'FluidR3Mono_GM.sf3',
+    sizeLabel: '22 MB',
+    remoteUrl:
+      'https://raw.githubusercontent.com/musescore/MuseScore/v3.6.2/share/sound/FluidR3Mono_GM.sf3',
+  },
+  {
+    id: 'musescore',
+    name: 'MuseScore General HD',
+    description: 'Detaillierte Studio-Samples (größter Umfang)',
+    fileName: 'MuseScore_General.sf3',
+    sizeLabel: '38 MB',
+    remoteUrl:
+      'https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf3',
+  },
+];
+
+// Deduplicate concurrent SoundFont downloads on the server
+const activeSoundFontDownloads = new Map<string, Promise<string>>();
 
 const ALLOWED_EXTENSIONS = new Set([
   'gp',
@@ -63,9 +106,45 @@ const folderMetaCache = new Map<string, ParsedMeta>();
 function ensureDirectories() {
   fs.mkdirSync(DATA_DIR, {recursive: true});
   fs.mkdirSync(SCORES_DIR, {recursive: true});
+  fs.mkdirSync(SOUNDFONTS_DIR, {recursive: true});
   if (!fs.existsSync(INDEX_FILE)) {
     fs.writeFileSync(INDEX_FILE, '[]', 'utf-8');
   }
+}
+
+async function ensureSoundFontCached(preset: SoundFontPreset): Promise<string> {
+  if (preset.localPath && fs.existsSync(preset.localPath)) {
+    return preset.localPath;
+  }
+
+  const cachedPath = path.join(SOUNDFONTS_DIR, preset.fileName);
+  if (fs.existsSync(cachedPath) && fs.statSync(cachedPath).size > 100_000) {
+    return cachedPath;
+  }
+
+  if (!preset.remoteUrl) {
+    throw new Error('SoundFont-Quelle nicht konfiguriert.');
+  }
+
+  const inflight = activeSoundFontDownloads.get(preset.id);
+  if (inflight) return inflight;
+
+  const downloadPromise = (async () => {
+    const tmpPath = `${cachedPath}.tmp`;
+    const response = await fetch(preset.remoteUrl!);
+    if (!response.ok || !response.body) {
+      throw new Error(`SoundFont-Download fehlgeschlagen (HTTP ${response.status})`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    fs.writeFileSync(tmpPath, Buffer.from(arrayBuffer));
+    fs.renameSync(tmpPath, cachedPath);
+    return cachedPath;
+  })().finally(() => {
+    activeSoundFontDownloads.delete(preset.id);
+  });
+
+  activeSoundFontDownloads.set(preset.id, downloadPromise);
+  return downloadPromise;
 }
 
 function readUploadedIndex(): SliceRecord[] {
@@ -257,6 +336,45 @@ async function startServer() {
   app.use((_req, res, next) => {
     res.setHeader('Content-Security-Policy', 'frame-ancestors *');
     next();
+  });
+
+  // --- SoundFont Catalog & Caching Proxy Endpoints ---
+  app.get('/api/soundfonts', (_req: Request, res: Response) => {
+    const list = SOUNDFONT_PRESETS.map((p) => {
+      const target = p.localPath || path.join(SOUNDFONTS_DIR, p.fileName);
+      const cached = fs.existsSync(target) && fs.statSync(target).size > 100_000;
+      return {
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        sizeLabel: p.sizeLabel,
+        cached,
+      };
+    });
+    res.json({soundFonts: list});
+  });
+
+  app.get('/api/soundfonts/:id', async (req: Request, res: Response) => {
+    const id = String(req.params.id || '');
+    const preset = SOUNDFONT_PRESETS.find((p) => p.id === id);
+    if (!preset) {
+      res.status(404).json({error: 'Unbekannter SoundFont.'});
+      return;
+    }
+
+    try {
+      const filePath = await ensureSoundFontCached(preset);
+      const stat = fs.statSync(filePath);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Length', String(stat.size));
+      res.setHeader('Content-Disposition', `inline; filename="${preset.fileName}"`);
+      fs.createReadStream(filePath).pipe(res);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'SoundFont konnte nicht geladen werden.';
+      res.status(502).json({error: msg});
+    }
   });
 
   // --- REST API Routes ---

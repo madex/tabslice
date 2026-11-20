@@ -33,6 +33,7 @@ export const EmbedModal: React.FC<EmbedModalProps> = ({
   const [showFretboard, setShowFretboard] = useState<boolean>(
     activeSlice?.showFretboard || false,
   );
+  const [soundFont, setSoundFont] = useState<'sonivox' | 'fluidr3' | 'musescore'>('fluidr3');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,8 +53,8 @@ export const EmbedModal: React.FC<EmbedModalProps> = ({
 
   const sliceEmbedUrl = useMemo(() => {
     if (!currentSlice) return '';
-    return buildSliceEmbedUrl(currentSlice.id, {layout, fretboard: showFretboard});
-  }, [currentSlice, layout, showFretboard]);
+    return buildSliceEmbedUrl(currentSlice.id, {layout, fretboard: showFretboard, soundFont});
+  }, [currentSlice, layout, showFretboard, soundFont]);
 
   const sliceShareUrl = useMemo(() => {
     if (!currentSlice) return '';
@@ -67,8 +68,9 @@ export const EmbedModal: React.FC<EmbedModalProps> = ({
       height: height || '500',
       layout,
       fretboard: showFretboard,
+      soundFont,
     });
-  }, [currentSlice, width, height, layout, showFretboard]);
+  }, [currentSlice, width, height, layout, showFretboard, soundFont]);
 
   const bbcodeIframe = useMemo(
     () => `[iframe]${sliceEmbedUrl}[/iframe]`,
@@ -90,9 +92,10 @@ export const EmbedModal: React.FC<EmbedModalProps> = ({
     const params = new URLSearchParams({embed: '1', file: externalUrl.trim()});
     if (layout === 'horizontal') params.set('layout', 'horizontal');
     if (showFretboard) params.set('fretboard', '1');
+    if (soundFont !== 'sonivox') params.set('sf', soundFont);
     const url = `${window.location.origin}/?${params.toString()}`;
     return `<iframe src="${url}" width="${width || '100%'}" height="${height || '500'}" frameborder="0" allowfullscreen=""></iframe>`;
-  }, [externalUrl, width, height, layout, showFretboard]);
+  }, [externalUrl, width, height, layout, showFretboard, soundFont]);
 
   if (!isOpen) return null;
 
@@ -185,15 +188,15 @@ export const EmbedModal: React.FC<EmbedModalProps> = ({
             ))}
           </div>
 
-          {/* Display Options */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {/* Display & Audio Options */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1">Breite</label>
               <input
                 type="text"
                 value={width}
                 onChange={(e) => setWidth(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-mono tabular-nums bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-900 focus:outline-none focus:border-blue-600"
+                className="w-full px-2.5 py-2 text-xs font-mono tabular-nums bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-900 focus:outline-none focus:border-blue-600"
               />
             </div>
             <div>
@@ -202,7 +205,7 @@ export const EmbedModal: React.FC<EmbedModalProps> = ({
                 type="text"
                 value={height}
                 onChange={(e) => setHeight(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-mono tabular-nums bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-900 focus:outline-none focus:border-blue-600"
+                className="w-full px-2.5 py-2 text-xs font-mono tabular-nums bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-900 focus:outline-none focus:border-blue-600"
               />
             </div>
             <div>
@@ -210,21 +213,35 @@ export const EmbedModal: React.FC<EmbedModalProps> = ({
               <select
                 value={layout}
                 onChange={(e) => setLayout(e.target.value as 'page' | 'horizontal')}
-                className="w-full px-3 py-2 text-xs bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-900 focus:outline-none focus:border-blue-600"
+                className="w-full px-2.5 py-2 text-xs bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-900 focus:outline-none focus:border-blue-600"
               >
-                <option value="page">Seitenansicht</option>
+                <option value="page">Seite</option>
                 <option value="horizontal">Horizontal</option>
               </select>
             </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-700 mb-1">SoundFont</label>
+              <select
+                value={soundFont}
+                onChange={(e) =>
+                  setSoundFont(e.target.value as 'sonivox' | 'fluidr3' | 'musescore')
+                }
+                className="w-full px-2.5 py-2 text-xs bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-900 focus:outline-none focus:border-blue-600"
+              >
+                <option value="fluidr3">FluidR3 Studio</option>
+                <option value="sonivox">Sonivox Schnell</option>
+                <option value="musescore">MuseScore HD</option>
+              </select>
+            </div>
             <div className="flex flex-col justify-end">
-              <label className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg cursor-pointer select-none">
+              <label className="flex items-center gap-2 px-2.5 py-2 text-xs text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg cursor-pointer select-none whitespace-nowrap">
                 <input
                   type="checkbox"
                   checked={showFretboard}
                   onChange={(e) => setShowFretboard(e.target.checked)}
                   className="accent-blue-600"
                 />
-                Griffbrett an
+                Griffbrett
               </label>
             </div>
           </div>

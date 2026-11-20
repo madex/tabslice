@@ -3,7 +3,7 @@ import {useCallback, useEffect, useMemo, useState} from 'react';
 import {CreateSliceModal} from './components/CreateSliceModal';
 import {EmbedModal} from './components/EmbedModal';
 import {SliceLibrary} from './components/SliceLibrary';
-import {TabSlicePlayer} from './components/TabSlicePlayer';
+import {SoundFontId, TabSlicePlayer} from './components/TabSlicePlayer';
 import {DEMO_SCORES} from './data/demoScores';
 import {SliceRecord, fetchSliceById, fetchSlices} from './types/slice';
 
@@ -15,6 +15,7 @@ interface RouteConfig {
   layout: 'page' | 'horizontal';
   fretboard: boolean;
   speed: number;
+  soundFont?: SoundFontId;
 }
 
 function parseRouteConfig(): RouteConfig {
@@ -40,8 +41,13 @@ function parseRouteConfig(): RouteConfig {
   const speedParam = Number(params.get('speed'));
   const speed =
     Number.isFinite(speedParam) && speedParam >= 25 && speedParam <= 200 ? speedParam / 100 : 1;
+  const sfParam = params.get('sf');
+  const soundFont: SoundFontId | undefined =
+    sfParam === 'sonivox' || sfParam === 'fluidr3' || sfParam === 'musescore'
+      ? sfParam
+      : undefined;
 
-  return {embed, routeSliceId, fileUrl, demo, layout, fretboard, speed};
+  return {embed, routeSliceId, fileUrl, demo, layout, fretboard, speed, soundFont};
 }
 
 export default function App() {
@@ -196,6 +202,7 @@ export default function App() {
           initialLayout={embedLayout}
           initialFretboard={embedFretboard}
           initialSpeed={routeConfig.speed}
+          initialSoundFont={routeConfig.soundFont}
         />
       </main>
     );
@@ -363,6 +370,7 @@ export default function App() {
               initialLayout={routeConfig.layout}
               initialFretboard={routeConfig.fretboard}
               initialSpeed={routeConfig.speed}
+              initialSoundFont={routeConfig.soundFont}
             />
           </div>
         </main>
