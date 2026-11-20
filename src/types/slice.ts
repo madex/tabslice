@@ -97,23 +97,40 @@ export async function deleteSliceById(id: string): Promise<void> {
   }
 }
 
-export function buildSliceEmbedUrl(
-  sliceId: string,
-  options?: {
-    layout?: 'page' | 'horizontal';
-    fretboard?: boolean;
-    speed?: number;
-    soundFont?: 'sonivox' | 'fluidr3' | 'musescore';
-  },
-): string {
+export type SoundFontPresetId = 'generaluser' | 'fluidr3' | 'musescore' | 'sonivox';
+export type CountInModeParam = 'off' | 'first' | 'always';
+export type StaveModeParam = 'default' | 'scoretab' | 'tab' | 'score';
+
+export interface EmbedUrlOptions {
+  width?: string;
+  height?: string;
+  layout?: 'page' | 'horizontal';
+  stave?: StaveModeParam;
+  showHeader?: boolean;
+  metronome?: boolean;
+  countIn?: CountInModeParam;
+  loop?: boolean;
+  fretboard?: boolean;
+  speed?: number;
+  soundFont?: SoundFontPresetId;
+  dark?: boolean;
+}
+
+export function buildSliceEmbedUrl(sliceId: string, options?: EmbedUrlOptions): string {
   const base = `${window.location.origin}/slices/${encodeURIComponent(sliceId)}/embed/`;
   const params = new URLSearchParams();
+  if (options?.showHeader === false) params.set('header', '0');
   if (options?.layout === 'horizontal') params.set('layout', 'horizontal');
+  if (options?.stave && options.stave !== 'default') params.set('stave', options.stave);
+  if (options?.metronome) params.set('metronome', '1');
+  if (options?.countIn && options.countIn !== 'first') params.set('countin', options.countIn);
+  if (options?.loop) params.set('loop', '1');
   if (options?.fretboard) params.set('fretboard', '1');
   if (options?.speed && options.speed !== 100) params.set('speed', String(options.speed));
-  if (options?.soundFont && options.soundFont !== 'sonivox') {
+  if (options?.soundFont && options.soundFont !== 'generaluser') {
     params.set('sf', options.soundFont);
   }
+  if (options?.dark) params.set('dark', '1');
   const qs = params.toString();
   return qs ? `${base}?${qs}` : base;
 }
@@ -122,21 +139,8 @@ export function buildSliceShareUrl(sliceId: string): string {
   return `${window.location.origin}/slices/${encodeURIComponent(sliceId)}`;
 }
 
-export function buildSliceIframeCode(
-  sliceId: string,
-  options?: {
-    width?: string;
-    height?: string;
-    layout?: 'page' | 'horizontal';
-    fretboard?: boolean;
-    soundFont?: 'sonivox' | 'fluidr3' | 'musescore';
-  },
-): string {
-  const url = buildSliceEmbedUrl(sliceId, {
-    layout: options?.layout,
-    fretboard: options?.fretboard,
-    soundFont: options?.soundFont,
-  });
+export function buildSliceIframeCode(sliceId: string, options?: EmbedUrlOptions): string {
+  const url = buildSliceEmbedUrl(sliceId, options);
   const w = options?.width || '100%';
   const h = options?.height || '500';
   return `<iframe src="${url}" width="${w}" height="${h}" frameborder="0" allowfullscreen=""></iframe>`;

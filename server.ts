@@ -29,17 +29,18 @@ interface SoundFontPreset {
 
 const SOUNDFONT_PRESETS: SoundFontPreset[] = [
   {
-    id: 'sonivox',
-    name: 'Sonivox Standard',
-    description: 'Kompakt & sofort startklar',
-    fileName: 'sonivox.sf2',
-    sizeLabel: '1,3 MB',
-    localPath: path.resolve(__dirname, 'public', 'soundfont', 'sonivox.sf2'),
+    id: 'generaluser',
+    name: 'GeneralUser GS 2.0.3',
+    description: 'Standard · Warmer Fingerstyle-Bass, ausgewogene Gitarren & Drums',
+    fileName: 'GeneralUser-GS-2.0.3.sf2',
+    sizeLabel: '30,8 MB',
+    remoteUrl:
+      'https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2',
   },
   {
     id: 'fluidr3',
     name: 'FluidR3 GM (Studio)',
-    description: 'Warmer Fingerstyle-Bass, realistische Gitarren & Drums',
+    description: 'Alternative GM-Bank · komprimiertes SF3',
     fileName: 'FluidR3Mono_GM.sf3',
     sizeLabel: '22 MB',
     remoteUrl:
@@ -48,11 +49,19 @@ const SOUNDFONT_PRESETS: SoundFontPreset[] = [
   {
     id: 'musescore',
     name: 'MuseScore General HD',
-    description: 'Detaillierte Studio-Samples (größter Umfang)',
+    description: 'Große Studio-Samplebank',
     fileName: 'MuseScore_General.sf3',
     sizeLabel: '38 MB',
     remoteUrl:
       'https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf3',
+  },
+  {
+    id: 'sonivox',
+    name: 'Sonivox Kompakt',
+    description: 'Ultra-schnell bei langsamer Verbindung',
+    fileName: 'sonivox.sf2',
+    sizeLabel: '1,3 MB',
+    localPath: path.resolve(__dirname, 'public', 'soundfont', 'sonivox.sf2'),
   },
 ];
 

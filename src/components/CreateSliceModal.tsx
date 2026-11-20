@@ -1,16 +1,9 @@
-import {
-  Check,
-  Code2,
-  Copy,
-  FileAudio2,
-  Link2,
-  Play,
-  Upload,
-  X,
-} from 'lucide-react';
+import {Check, Code2, Copy, FileAudio2, Link2, Play, Upload, X} from 'lucide-react';
 import React, {useRef, useState} from 'react';
 import {
+  CountInModeParam,
   SliceRecord,
+  StaveModeParam,
   buildSliceEmbedUrl,
   buildSliceIframeCode,
   buildSliceShareUrl,
@@ -24,23 +17,22 @@ interface CreateSliceModalProps {
   onClose: () => void;
   onSliceCreated: (slice: SliceRecord) => void;
   onOpenSliceInPlayer: (slice: SliceRecord) => void;
-  /** Optional pre-selected local file (e.g. when user dropped a file on the player and wants to publish it) */
   initialFile?: File | null;
 }
 
 const ACCEPTED_EXTENSIONS = '.gp,.gp3,.gp4,.gp5,.gpx,.gp7,.gp8,.xml,.musicxml,.mxl,.cap,.tex';
 
-const STARTER_TEX = `\\title "Neues Riff"
-\\artist "Dein Name"
-\\tempo 110
+const STARTER_TEX = `\\title "Bass Groove"
+\\artist "Andy's Basscamp"
+\\tempo 100
 
-\\track ("Gitarre" "Gtr")
+\\track ("E-Bass Fingerstyle" "Bass")
   \\staff {score tabs}
-  \\instrument 29
-  \\tuning (E4 B3 G3 D3 A2 E2)
+  \\instrument electricbassfinger
+  \\tuning (G2 D2 A1 E1)
   \\ts (4 4)
-  :8 0.6 3.6 5.6 0.6 3.6 6.6 5.6 r |
-  :8 0.6 3.6 5.6 3.6 :2 0.6{v}
+  :8 0.4 0.4 3.4 5.4 2.3 0.4 3.4 2.4 |
+  :8 0.4 0.4 3.4 5.4 :2 7.3{v}
 `;
 
 export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
@@ -60,8 +52,15 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
   const [customSlug, setCustomSlug] = useState<string>('');
   const [defaultLayout, setDefaultLayout] = useState<'page' | 'horizontal'>('page');
   const [showFretboard, setShowFretboard] = useState<boolean>(false);
-  const [isDragging, setIsDragging] = useState<boolean>(false);
 
+  // Instant embed link parameter toggles on the created link screen
+  const [linkShowHeader, setLinkShowHeader] = useState<boolean>(true);
+  const [linkMetronome, setLinkMetronome] = useState<boolean>(false);
+  const [linkCountIn, setLinkCountIn] = useState<CountInModeParam>('first');
+  const [linkLoop, setLinkLoop] = useState<boolean>(false);
+  const [linkStave, setLinkStave] = useState<StaveModeParam>('default');
+
+  const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [createdSlice, setCreatedSlice] = useState<SliceRecord | null>(null);
@@ -76,6 +75,11 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
       setArtist('');
       setCustomSlug('');
       setMode('file');
+      setLinkShowHeader(true);
+      setLinkMetronome(false);
+      setLinkCountIn('first');
+      setLinkLoop(false);
+      setLinkStave('default');
     }
   }, [isOpen, initialFile]);
 
@@ -87,7 +91,7 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
       setCopiedKey(key);
       window.setTimeout(() => setCopiedKey(null), 1800);
     } catch {
-      // Ignore clipboard failure
+      // Ignore
     }
   };
 
@@ -141,18 +145,20 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
     }
   };
 
-  const iframeCode = createdSlice
-    ? buildSliceIframeCode(createdSlice.id, {
+  const linkOpts = createdSlice
+    ? {
         layout: createdSlice.defaultLayout,
         fretboard: createdSlice.showFretboard,
-      })
-    : '';
-  const embedUrl = createdSlice
-    ? buildSliceEmbedUrl(createdSlice.id, {
-        layout: createdSlice.defaultLayout,
-        fretboard: createdSlice.showFretboard,
-      })
-    : '';
+        showHeader: linkShowHeader,
+        metronome: linkMetronome,
+        countIn: linkCountIn,
+        loop: linkLoop,
+        stave: linkStave,
+      }
+    : undefined;
+
+  const iframeCode = createdSlice ? buildSliceIframeCode(createdSlice.id, linkOpts) : '';
+  const embedUrl = createdSlice ? buildSliceEmbedUrl(createdSlice.id, linkOpts) : '';
   const shareUrl = createdSlice ? buildSliceShareUrl(createdSlice.id) : '';
   const bbcodeIframe = createdSlice ? `[iframe]${embedUrl}[/iframe]` : '';
 
@@ -172,12 +178,14 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200">
           <div>
             <h2 id="create-slice-title" className="text-base font-semibold text-zinc-900">
-              {createdSlice ? 'Slice erstellt — bereit fürs Forum' : 'Neuen Slice auf dem Server anlegen'}
+              {createdSlice
+                ? "Slice erstellt — bereit für Andy's Basscamp"
+                : 'Neuen Slice auf dem Server anlegen'}
             </h2>
             <p className="text-xs text-zinc-500 mt-0.5">
               {createdSlice
-                ? 'Deine Datei ist sofort unter einem kurzen Embed-Link erreichbar.'
-                : 'Guitar-Pro-Datei ablegen oder alphaTex schreiben — du erhältst direkt deinen Forum-Embed-Link.'}
+                ? 'Passe bei Bedarf die Embed-Parameter an und kopiere den fertigen Iframe-Code.'
+                : 'Guitar-Pro-Datei hochladen — du erhältst direkt einen konfigurierbaren Forum-Link.'}
             </p>
           </div>
           <button
@@ -190,9 +198,9 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
           </button>
         </div>
 
-        {/* Success View: Ready-to-paste Forum Links */}
+        {/* Success View: Configure Embed Parameters & Copy */}
         {createdSlice ? (
-          <div className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
+          <div className="p-6 space-y-5 max-h-[82vh] overflow-y-auto">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-zinc-200">
               <div>
                 <h3 className="text-sm font-semibold text-zinc-900">{createdSlice.title}</h3>
@@ -223,19 +231,95 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
               </button>
             </div>
 
-            {/* 1. HTML Iframe (like Soundslice) */}
+            {/* Live Embed Parameter Toggles */}
+            <div className="space-y-2.5">
+              <span className="block text-xs font-medium text-zinc-700">
+                Iframe-Parameter für diesen Link
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <label className="flex items-center gap-2 px-2.5 py-2 text-xs text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={linkShowHeader}
+                    onChange={(e) => setLinkShowHeader(e.target.checked)}
+                    className="accent-blue-600"
+                  />
+                  Songtitel zeigen
+                </label>
+                <label className="flex items-center gap-2 px-2.5 py-2 text-xs text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={linkMetronome}
+                    onChange={(e) => setLinkMetronome(e.target.checked)}
+                    className="accent-blue-600"
+                  />
+                  Metronom aktiv
+                </label>
+                <label className="flex items-center gap-2 px-2.5 py-2 text-xs text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={linkLoop}
+                    onChange={(e) => setLinkLoop(e.target.checked)}
+                    className="accent-blue-600"
+                  />
+                  Loop aktiv
+                </label>
+                <select
+                  value={linkCountIn}
+                  onChange={(e) => setLinkCountIn(e.target.value as CountInModeParam)}
+                  className="px-2.5 py-2 text-xs bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-800 focus:outline-none focus:border-blue-600"
+                  aria-label="Einzähler-Modus"
+                >
+                  <option value="first">Count-in: 1× Start</option>
+                  <option value="always">Count-in: Jeder Loop</option>
+                  <option value="off">Count-in: Aus</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={linkStave}
+                  onChange={(e) => setLinkStave(e.target.value as StaveModeParam)}
+                  className="px-2.5 py-1.5 text-xs bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-800 focus:outline-none focus:border-blue-600"
+                  aria-label="Notenansicht"
+                >
+                  <option value="default">Ansicht: Automatisch</option>
+                  <option value="scoretab">Ansicht: Noten + Tab</option>
+                  <option value="tab">Ansicht: Nur Tabulatur</option>
+                  <option value="score">Ansicht: Nur Noten</option>
+                </select>
+                <label className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={createdSlice.showFretboard}
+                    onChange={(e) =>
+                      setCreatedSlice((prev) =>
+                        prev ? {...prev, showFretboard: e.target.checked} : prev,
+                      )
+                    }
+                    className="accent-blue-600"
+                  />
+                  Live-Griffbrett offen
+                </label>
+              </div>
+            </div>
+
+            {/* 1. HTML Iframe */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700">
                   <Code2 className="w-3.5 h-3.5 text-zinc-500" />
-                  HTML Iframe (wie Soundslice)
+                  HTML Iframe (Andy&apos;s Basscamp)
                 </span>
                 <button
                   type="button"
                   onClick={() => handleCopy('iframe', iframeCode)}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors whitespace-nowrap"
                 >
-                  {copiedKey === 'iframe' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedKey === 'iframe' ? (
+                    <Check className="w-3.5 h-3.5" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
                   {copiedKey === 'iframe' ? 'Kopiert' : 'Kopieren'}
                 </button>
               </div>
@@ -253,7 +337,11 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
                   onClick={() => handleCopy('bbcode', bbcodeIframe)}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-md transition-colors whitespace-nowrap"
                 >
-                  {copiedKey === 'bbcode' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedKey === 'bbcode' ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
                   {copiedKey === 'bbcode' ? 'Kopiert' : 'BBCode kopieren'}
                 </button>
               </div>
@@ -274,7 +362,11 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
                   onClick={() => handleCopy('link', shareUrl)}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-md transition-colors whitespace-nowrap"
                 >
-                  {copiedKey === 'link' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedKey === 'link' ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
                   {copiedKey === 'link' ? 'Kopiert' : 'Link kopieren'}
                 </button>
               </div>
@@ -308,7 +400,7 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
           </div>
         ) : (
           /* Creation Form */
-          <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
+          <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[82vh] overflow-y-auto">
             {/* Mode Switch */}
             <div className="flex items-center gap-1 p-1 bg-zinc-100 rounded-lg w-fit">
               <button
@@ -331,7 +423,7 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
                     : 'text-zinc-600 hover:text-zinc-900'
                 }`}
               >
-                Neues alphaTex schreiben
+                Quick-Riff (alphaTex)
               </button>
             </div>
 
@@ -431,7 +523,7 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
                   type="text"
                   value={artist}
                   onChange={(e) => setArtist(e.target.value)}
-                  placeholder="z. B. Bandname oder Übung"
+                  placeholder="z. B. Andy's Basscamp"
                   className="w-full px-3 py-2 text-xs bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-900 focus:outline-none focus:border-blue-600"
                 />
               </div>
@@ -446,7 +538,7 @@ export const CreateSliceModal: React.FC<CreateSliceModalProps> = ({
                   type="text"
                   value={customSlug}
                   onChange={(e) => setCustomSlug(e.target.value)}
-                  placeholder="z. B. blues-lick-1"
+                  placeholder="z. B. slap-uebung-1"
                   className="w-full px-3 py-2 text-xs font-mono bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-900 focus:outline-none focus:border-blue-600"
                 />
               </div>

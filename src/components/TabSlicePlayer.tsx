@@ -3,19 +3,23 @@ import {
   AudioLines,
   ChevronDown,
   CloudUpload,
-  Code2,
+  Columns2,
+  FileAudio,
   FolderOpen,
   Gauge,
   Guitar,
   Layers,
   Maximize2,
   Minimize2,
+  Minus,
   Moon,
   Pause,
   Play,
+  Plus,
   Printer,
   Repeat,
   RotateCcw,
+  Rows3,
   SlidersHorizontal,
   Sun,
   TrendingUp,
@@ -26,13 +30,17 @@ import {
 } from 'lucide-react';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {DEMO_SCORES} from '../data/demoScores';
-import {SliceRecord} from '../types/slice';
-import {AlphaTexDrawer} from './AlphaTexDrawer';
+import {
+  CountInModeParam,
+  SliceRecord,
+  SoundFontPresetId,
+  StaveModeParam,
+} from '../types/slice';
 import {ActiveFretNote, FretboardVisualizer} from './FretboardVisualizer';
 import {MetronomeIcon} from './MetronomeIcon';
 
-export type SoundFontId = 'sonivox' | 'fluidr3' | 'musescore' | 'custom';
-export type CountInMode = 'off' | 'first' | 'always';
+export type SoundFontId = SoundFontPresetId | 'custom';
+export type CountInMode = CountInModeParam;
 
 export interface TabSlicePlayerProps {
   /** True when rendered via /slices/:id/embed/ or ?embed=1 inside an iframe */
@@ -43,20 +51,22 @@ export interface TabSlicePlayerProps {
   initialFileUrl?: string | null;
   /** Built-in fallback demo id */
   demoId: string;
-  /** External trigger to open file picker */
-  openFileTrigger: number;
-  /** External toggle for alphaTex drawer */
-  texDrawerOpen: boolean;
-  onTexDrawerOpenChange: (open: boolean) => void;
   /** Callback when user wants to publish a locally dropped file to the server */
   onPublishLocalFile?: (file: File) => void;
-  /** Initial layout, fretboard, speed & soundfont options from query params */
+  /** Initial iframe / player options */
+  initialShowHeader?: boolean;
   initialLayout?: 'page' | 'horizontal';
+  initialStaveProfile?: StaveModeParam;
   initialFretboard?: boolean;
+  initialMetronome?: boolean;
+  initialCountIn?: CountInMode;
+  initialLoop?: boolean;
   initialSpeed?: number;
-  initialSoundFont?: SoundFontId;
-  /** Notify parent when a file/score is loaded */
-  onScoreMetaChange?: (meta: {title: string; artist: string; sourceLabel: string}) => void;
+  initialSoundFont?: SoundFontPresetId;
+  initialDark?: boolean;
+  /** Studio preview toggle (500px iframe frame) */
+  embedPreviewMode?: boolean;
+  onToggleEmbedPreview?: () => void;
 }
 
 interface TrackMixerState {
@@ -76,28 +86,38 @@ interface TempoTrainerConfig {
   completedLoops: number;
 }
 
+interface AudioTrackState {
+  url: string | null;
+  name: string;
+  source: 'embedded' | 'custom' | null;
+  volume: number; // 0..1
+  muted: boolean;
+  solo: boolean;
+  offsetMs: number;
+}
+
 type PopoverType = 'tracks' | 'speed' | 'view' | null;
 
 const ACCEPTED_EXTENSIONS = '.gp,.gp3,.gp4,.gp5,.gpx,.gp7,.gp8,.xml,.musicxml,.mxl,.cap,.tex';
 const SPEED_PRESETS = [0.5, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5];
-const SOUNDFONT_STORAGE_KEY = 'tabslice:soundfont';
+const SOUNDFONT_STORAGE_KEY = 'tabslice:soundfont:v2';
 
 const SOUNDFONT_OPTIONS: Array<{
-  id: Exclude<SoundFontId, 'custom'>;
+  id: SoundFontPresetId;
   name: string;
   hint: string;
   url: string;
 }> = [
   {
-    id: 'sonivox',
-    name: 'Sonivox Standard',
-    hint: 'Schnell · 1,3 MB',
-    url: `${import.meta.env.BASE_URL}soundfont/sonivox.sf2`,
+    id: 'generaluser',
+    name: 'GeneralUser GS 2.0.3',
+    hint: 'Standard · 30,8 MB',
+    url: '/api/soundfonts/generaluser',
   },
   {
     id: 'fluidr3',
     name: 'FluidR3 GM (Studio)',
-    hint: 'Empfohlen · 22 MB',
+    hint: 'Alternative · 22 MB',
     url: '/api/soundfonts/fluidr3',
   },
   {
@@ -106,42 +126,63 @@ const SOUNDFONT_OPTIONS: Array<{
     hint: 'Konzert · 38 MB',
     url: '/api/soundfonts/musescore',
   },
+  {
+    id: 'sonivox',
+    name: 'Sonivox Kompakt',
+    hint: 'Schnell · 1,3 MB',
+    url: `${import.meta.env.BASE_URL}soundfont/sonivox.sf2`,
+  },
 ];
 
-const INSTRUMENT_PRESETS: Array<{program: number; label: string; group: string}> = [
-  {program: 33, label: 'E-Bass (Fingerstyle)', group: 'Bass'},
-  {program: 34, label: 'E-Bass (Plektrum / Pick)', group: 'Bass'},
-  {program: 35, label: 'Fretless Bass', group: 'Bass'},
-  {program: 36, label: 'Slap Bass', group: 'Bass'},
-  {program: 32, label: 'Akustik- / Kontrabass', group: 'Bass'},
-  {program: 25, label: 'Akustikgitarre (Stahl)', group: 'Gitarre'},
-  {program: 24, label: 'Akustikgitarre (Nylon)', group: 'Gitarre'},
-  {program: 26, label: 'E-Gitarre (Jazz)', group: 'Gitarre'},
-  {program: 27, label: 'E-Gitarre (Clean)', group: 'Gitarre'},
-  {program: 28, label: 'E-Gitarre (Muted)', group: 'Gitarre'},
-  {program: 29, label: 'E-Gitarre (Overdrive)', group: 'Gitarre'},
-  {program: 30, label: 'E-Gitarre (Distortion)', group: 'Gitarre'},
-  {program: 0, label: 'Klavier (Acoustic Grand)', group: 'Tasten'},
+const INSTRUMENT_PRESETS: Array<{program: number; label: string}> = [
+  {program: 33, label: 'E-Bass (Fingerstyle)'},
+  {program: 34, label: 'E-Bass (Plektrum / Pick)'},
+  {program: 35, label: 'Fretless Bass'},
+  {program: 36, label: 'Slap Bass'},
+  {program: 32, label: 'Akustik- / Kontrabass'},
+  {program: 25, label: 'Akustikgitarre (Stahl)'},
+  {program: 24, label: 'Akustikgitarre (Nylon)'},
+  {program: 26, label: 'E-Gitarre (Jazz)'},
+  {program: 27, label: 'E-Gitarre (Clean)'},
+  {program: 28, label: 'E-Gitarre (Muted)'},
+  {program: 29, label: 'E-Gitarre (Overdrive)'},
+  {program: 30, label: 'E-Gitarre (Distortion)'},
+  {program: 0, label: 'Klavier (Acoustic Grand)'},
 ];
 
-function getInitialSoundFont(paramSf?: SoundFontId): SoundFontId {
-  if (paramSf === 'sonivox' || paramSf === 'fluidr3' || paramSf === 'musescore') {
+function getInitialSoundFont(paramSf?: SoundFontPresetId): SoundFontId {
+  if (
+    paramSf === 'generaluser' ||
+    paramSf === 'fluidr3' ||
+    paramSf === 'musescore' ||
+    paramSf === 'sonivox'
+  ) {
     return paramSf;
   }
   try {
     const saved = window.localStorage.getItem(SOUNDFONT_STORAGE_KEY);
-    if (saved === 'sonivox' || saved === 'fluidr3' || saved === 'musescore') {
+    if (
+      saved === 'generaluser' ||
+      saved === 'fluidr3' ||
+      saved === 'musescore' ||
+      saved === 'sonivox'
+    ) {
       return saved;
     }
   } catch {
-    // Ignore storage errors inside restricted iframes
+    // Ignore restricted iframe storage
   }
-  return 'sonivox';
+  return 'generaluser';
 }
 
 function getSoundFontUrl(id: SoundFontId): string {
   const found = SOUNDFONT_OPTIONS.find((opt) => opt.id === id);
   return found ? found.url : SOUNDFONT_OPTIONS[0].url;
+}
+
+function getSoundFontLabel(id: SoundFontId, customName: string | null): string {
+  if (id === 'custom' && customName) return customName;
+  return SOUNDFONT_OPTIONS.find((opt) => opt.id === id)?.name || 'GeneralUser GS 2.0.3';
 }
 
 function formatTime(ms: number): string {
@@ -180,26 +221,52 @@ function applySheetColors(settings: alphaTab.Settings, darkSheet: boolean) {
   }
 }
 
+function applyScoreHeaderVisibility(settings: alphaTab.Settings, visible: boolean) {
+  settings.notation.elements.set(alphaTab.NotationElement.ScoreTitle, visible);
+  settings.notation.elements.set(alphaTab.NotationElement.ScoreSubTitle, visible);
+  settings.notation.elements.set(alphaTab.NotationElement.ScoreArtist, visible);
+  settings.notation.elements.set(alphaTab.NotationElement.ScoreAlbum, visible);
+}
+
+function mapStaveProfile(profile: StaveModeParam): alphaTab.StaveProfile {
+  switch (profile) {
+    case 'scoretab':
+      return alphaTab.StaveProfile.ScoreTab;
+    case 'tab':
+      return alphaTab.StaveProfile.Tab;
+    case 'score':
+      return alphaTab.StaveProfile.Score;
+    default:
+      return alphaTab.StaveProfile.Default;
+  }
+}
+
 export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
   isEmbedMode,
   activeSlice = null,
   initialFileUrl,
   demoId,
-  openFileTrigger,
-  texDrawerOpen,
-  onTexDrawerOpenChange,
   onPublishLocalFile,
+  initialShowHeader = true,
   initialLayout = 'page',
+  initialStaveProfile = 'default',
   initialFretboard = false,
+  initialMetronome = false,
+  initialCountIn = 'first',
+  initialLoop = false,
   initialSpeed = 1,
   initialSoundFont,
-  onScoreMetaChange,
+  initialDark = false,
+  embedPreviewMode = false,
+  onToggleEmbedPreview,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const mountRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const soundFontInputRef = useRef<HTMLInputElement>(null);
+  const audioFileInputRef = useRef<HTMLInputElement>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
   const apiRef = useRef<alphaTab.AlphaTabApi | null>(null);
   const selectedTrackIndexesRef = useRef<number[]>([0]);
   const repeatRestartTimerRef = useRef<number | null>(null);
@@ -208,11 +275,22 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
   const [score, setScore] = useState<alphaTab.model.Score | null>(null);
   const [selectedTrackIndexes, setSelectedTrackIndexes] = useState<number[]>([0]);
   const [mixerState, setMixerState] = useState<Record<number, TrackMixerState>>({});
-  const [sourceLabel, setSourceLabel] = useState<string>('alphaTex Demo');
+  const [sourceLabel, setSourceLabel] = useState<string>('alphaTab');
   const [isLoadingScore, setIsLoadingScore] = useState<boolean>(true);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
-  // Audio / SoundFont / playback state
+  // Dedicated Audio-Spur / Backing Track state (embedded GP7/8 audio OR user MP3/WAV/OGG)
+  const [audioTrack, setAudioTrack] = useState<AudioTrackState>({
+    url: null,
+    name: '',
+    source: null,
+    volume: 0.85,
+    muted: false,
+    solo: false,
+    offsetMs: 0,
+  });
+
+  // SoundFont & playback state
   const [activeSoundFont, setActiveSoundFont] = useState<SoundFontId>(() =>
     getInitialSoundFont(initialSoundFont),
   );
@@ -228,7 +306,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     null,
   );
 
-  // Practice controls: Speed, BPM, Tempo-Trainer, Metronome, Count-in (off | first | always)
+  // Practice controls: Speed, BPM, Tempo-Trainer, Metronome, Count-in
   const [speed, setSpeed] = useState<number>(
     Math.min(2, Math.max(0.25, Number.isFinite(initialSpeed) ? initialSpeed : 1)),
   );
@@ -243,96 +321,142 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     completedLoops: 0,
   });
 
-  const [isLooping, setIsLooping] = useState<boolean>(false);
-  const [metronomeOn, setMetronomeOn] = useState<boolean>(false);
+  const [isLooping, setIsLooping] = useState<boolean>(initialLoop);
+  const [metronomeOn, setMetronomeOn] = useState<boolean>(initialMetronome);
   const [metronomeVolume, setMetronomeVolume] = useState<number>(0.85);
   const [metronomeTickRight, setMetronomeTickRight] = useState<boolean>(true);
-  const [countInMode, setCountInMode] = useState<CountInMode>('first');
+  const [countInMode, setCountInMode] = useState<CountInMode>(initialCountIn);
   const [masterVolume, setMasterVolume] = useState<number>(1);
   const [isMasterMuted, setIsMasterMuted] = useState<boolean>(false);
 
-  // View settings
+  // Display / View settings
+  const [showHeader, setShowHeader] = useState<boolean>(initialShowHeader);
   const [layoutMode, setLayoutMode] = useState<'page' | 'horizontal'>(initialLayout);
-  const [staveProfile, setStaveProfile] = useState<'default' | 'scoretab' | 'tab' | 'score'>(
-    'default',
-  );
+  const [staveProfile, setStaveProfile] = useState<StaveModeParam>(initialStaveProfile);
   const [zoom, setZoom] = useState<number>(1.0);
   const [scrollMode, setScrollMode] = useState<'continuous' | 'offscreen' | 'off'>('continuous');
-  const [darkSheet, setDarkSheet] = useState<boolean>(false);
+  const [darkSheet, setDarkSheet] = useState<boolean>(initialDark);
   const [showFretboard, setShowFretboard] = useState<boolean>(initialFretboard);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [activePopover, setActivePopover] = useState<PopoverType>(null);
 
-  // Drag & drop + alphaTex editor state
+  // Drag & drop Guitar Pro local draft
   const [isDraggingFile, setIsDraggingFile] = useState<boolean>(false);
   const [localDraftFile, setLocalDraftFile] = useState<File | null>(null);
-  const [texCode, setTexCode] = useState<string>(() => {
-    const found = DEMO_SCORES.find((d) => d.id === demoId) ?? DEMO_SCORES[0];
-    return found.tex;
-  });
-  const [texError, setTexError] = useState<string | null>(null);
 
   // Active fretboard notes synced from alphaTab activeBeatsChanged
   const [activeFretNotes, setActiveFretNotes] = useState<ActiveFretNote[]>([]);
 
-  // Live refs for alphaTab event callbacks (avoids stale closures)
+  // Live refs for event callbacks
   const scoreRef = useRef<alphaTab.model.Score | null>(null);
   const speedRef = useRef<number>(speed);
   const isLoopingRef = useRef<boolean>(isLooping);
   const countInModeRef = useRef<CountInMode>(countInMode);
+  const metronomeOnRef = useRef<boolean>(metronomeOn);
+  const metronomeVolRef = useRef<number>(metronomeVolume);
   const trainerRef = useRef<TempoTrainerConfig>(trainer);
   const playbackRangeRef = useRef<{startTick: number; endTick: number} | null>(playbackRange);
+  const audioTrackRef = useRef<AudioTrackState>(audioTrack);
+  const masterVolumeRef = useRef<number>(masterVolume);
+  const isMasterMutedRef = useRef<boolean>(isMasterMuted);
   const manualStopRef = useRef<boolean>(false);
 
   useEffect(() => {
     selectedTrackIndexesRef.current = selectedTrackIndexes;
   }, [selectedTrackIndexes]);
-
   useEffect(() => {
     scoreRef.current = score;
   }, [score]);
-
   useEffect(() => {
     speedRef.current = speed;
   }, [speed]);
-
   useEffect(() => {
     isLoopingRef.current = isLooping;
   }, [isLooping]);
-
   useEffect(() => {
     countInModeRef.current = countInMode;
   }, [countInMode]);
-
+  useEffect(() => {
+    metronomeOnRef.current = metronomeOn;
+  }, [metronomeOn]);
+  useEffect(() => {
+    metronomeVolRef.current = metronomeVolume;
+  }, [metronomeVolume]);
   useEffect(() => {
     trainerRef.current = trainer;
   }, [trainer]);
-
   useEffect(() => {
     playbackRangeRef.current = playbackRange;
   }, [playbackRange]);
+  useEffect(() => {
+    audioTrackRef.current = audioTrack;
+  }, [audioTrack]);
+  useEffect(() => {
+    masterVolumeRef.current = masterVolume;
+  }, [masterVolume]);
+  useEffect(() => {
+    isMasterMutedRef.current = isMasterMuted;
+  }, [isMasterMuted]);
 
   const baseTempo = score?.tempo || 120;
   const effectiveBpm = Math.max(15, Math.round(baseTempo * speed));
 
-  // Keep numeric BPM input text synced whenever score tempo or speed changes
   useEffect(() => {
     setBpmInputText(String(effectiveBpm));
   }, [effectiveBpm]);
 
-  // Sync native synth looping vs managed repeat-with-count-in mode:
-  // When user enables Loop + Count-in "Bei jeder Wiederholung" ('always'),
-  // we disable internal seamless synth looping so playerFinished fires at loop end,
-  // allowing us to bump Tempo-Trainer BPM and invoke alphaTab's native Count-In cleanly!
-  const syncSynthLoopAndCountIn = useCallback(
-    (loopEnabled: boolean, mode: CountInMode) => {
-      const api = apiRef.current;
-      if (!api) return;
-      api.countInVolume = mode === 'off' ? 0 : 1;
-      api.isLooping = loopEnabled && mode !== 'always';
-    },
-    [],
-  );
+  // Sync HTMLAudioElement backing track volume, mute, playbackRate
+  useEffect(() => {
+    const audio = audioElRef.current;
+    if (!audio) return;
+    const effectiveMaster = isMasterMuted ? 0 : masterVolume;
+    audio.volume = Math.max(0, Math.min(1, audioTrack.volume * effectiveMaster));
+    audio.muted = audioTrack.muted || isMasterMuted;
+    audio.playbackRate = Math.min(2, Math.max(0.25, speed));
+    const audioAny = audio as HTMLAudioElement & {
+      preservesPitch?: boolean;
+      webkitPreservesPitch?: boolean;
+    };
+    if (typeof audioAny.preservesPitch === 'boolean') audioAny.preservesPitch = true;
+    if (typeof audioAny.webkitPreservesPitch === 'boolean') audioAny.webkitPreservesPitch = true;
+  }, [audioTrack.volume, audioTrack.muted, masterVolume, isMasterMuted, speed]);
+
+  // Revoke previous Blob URLs when audioTrack changes or component unmounts
+  useEffect(() => {
+    const currentUrl = audioTrack.url;
+    return () => {
+      if (currentUrl && currentUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(currentUrl);
+      }
+    };
+  }, [audioTrack.url]);
+
+  const syncAudioTrackToTime = useCallback((timeMs: number, shouldPlay: boolean) => {
+    const audio = audioElRef.current;
+    const track = audioTrackRef.current;
+    if (!audio || !track.url) return;
+
+    const targetSec = Math.max(0, (timeMs + track.offsetMs) / 1000);
+    if (Math.abs(audio.currentTime - targetSec) > 0.14) {
+      try {
+        audio.currentTime = targetSec;
+      } catch {
+        // Ignore seek before metadata loaded
+      }
+    }
+    if (shouldPlay && audio.paused) {
+      audio.play().catch(() => {});
+    } else if (!shouldPlay && !audio.paused) {
+      audio.pause();
+    }
+  }, []);
+
+  const syncSynthLoopAndCountIn = useCallback((loopEnabled: boolean, mode: CountInMode) => {
+    const api = apiRef.current;
+    if (!api) return;
+    api.countInVolume = mode === 'off' ? 0 : 1;
+    api.isLooping = loopEnabled && mode !== 'always';
+  }, []);
 
   useEffect(() => {
     syncSynthLoopAndCountIn(isLooping, countInMode);
@@ -345,21 +469,14 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     }
   }, []);
 
-  // Trigger file input from parent studio bar
-  useEffect(() => {
-    if (openFileTrigger > 0) {
-      fileInputRef.current?.click();
-    }
-  }, [openFileTrigger]);
-
   // Load binary or text Guitar Pro / MusicXML / alphaTex file
   const loadLocalFile = useCallback(
     (file: File) => {
       const api = apiRef.current;
       if (!api) return;
       clearPendingRepeatRestart();
+      audioElRef.current?.pause();
       setErrorBanner(null);
-      setTexError(null);
       setIsLoadingScore(true);
       setLocalDraftFile(file);
 
@@ -368,7 +485,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         const reader = new FileReader();
         reader.onload = () => {
           const text = typeof reader.result === 'string' ? reader.result : '';
-          setTexCode(text);
           setSourceLabel(`${file.name} · alphaTex`);
           api.tex(text);
         };
@@ -402,14 +518,14 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     [clearPendingRepeatRestart],
   );
 
-  // Load remote file URL (for ?file=... embed parameter, /api/slices/:id/file, or postMessage)
+  // Load remote file URL (/api/slices/:id/file or ?file=...)
   const loadRemoteUrl = useCallback(
     async (url: string, labelOverride?: string, extHint?: string) => {
       const api = apiRef.current;
       if (!api) return;
       clearPendingRepeatRestart();
+      audioElRef.current?.pause();
       setErrorBanner(null);
-      setTexError(null);
       setIsLoadingScore(true);
       setLocalDraftFile(null);
       try {
@@ -425,7 +541,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
 
         if (isTex) {
           const text = new TextDecoder().decode(buffer);
-          setTexCode(text);
           setSourceLabel(labelOverride || `${fileName} · alphaTex`);
           api.tex(text);
         } else {
@@ -439,7 +554,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         setIsLoadingScore(false);
         const msg = err instanceof Error ? err.message : 'Unbekannter Fehler';
         setErrorBanner(
-          `Datei konnte nicht geladen werden (${msg}). Prüfe URL/Server oder ziehe eine Guitar-Pro-Datei direkt in den Player.`,
+          `Datei konnte nicht geladen werden (${msg}). Prüfe URL/Server oder lade eine Guitar-Pro-Datei hoch.`,
         );
       }
     },
@@ -461,11 +576,13 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       initialLayout === 'horizontal'
         ? alphaTab.LayoutMode.Horizontal
         : alphaTab.LayoutMode.Page;
-    settings.display.staveProfile = alphaTab.StaveProfile.Default;
+    settings.display.staveProfile = mapStaveProfile(initialStaveProfile);
     settings.display.scale = 1.0;
-    applySheetColors(settings, false);
+    applySheetColors(settings, initialDark);
+    applyScoreHeaderVisibility(settings, initialShowHeader);
 
-    settings.player.enablePlayer = true;
+    // Use Synthesizer mode so MIDI tracks remain individually mixable alongside our synchronized Audio-Spur!
+    settings.player.playerMode = alphaTab.PlayerMode.EnabledSynthesizer;
     settings.player.enableCursor = true;
     settings.player.enableUserInteraction = true;
     settings.player.soundFont = getSoundFontUrl(initialSfId);
@@ -491,6 +608,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       setIsPlayerReady(true);
       api.playbackSpeed = Math.min(2, Math.max(0.25, initialSpeed));
       api.countInVolume = countInModeRef.current === 'off' ? 0 : 1;
+      api.metronomeVolume = metronomeOnRef.current ? metronomeVolRef.current : 0;
       api.isLooping = isLoopingRef.current && countInModeRef.current !== 'always';
     });
 
@@ -498,11 +616,33 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       setScore(loadedScore);
       setIsLoadingScore(false);
       setErrorBanner(null);
-      setTexError(null);
       setPlaybackRange(null);
       setActiveFretNotes([]);
 
-      // Update Tempo-Trainer defaults to match the loaded song's natural BPM (70% -> 100%)
+      // Detect embedded Guitar Pro 7/8 audio backing track and expose it as its own Audio-Spur!
+      const rawAudio = loadedScore.backingTrack?.rawAudioFile;
+      if (rawAudio && rawAudio.length > 0) {
+        const copy = new Uint8Array(rawAudio.byteLength);
+        copy.set(rawAudio);
+        const blobUrl = URL.createObjectURL(new Blob([copy.buffer], {type: 'audio/mpeg'}));
+        setAudioTrack({
+          url: blobUrl,
+          name: 'Eingebettete Audio-Spur (Guitar Pro)',
+          source: 'embedded',
+          volume: 0.9,
+          muted: false,
+          solo: false,
+          offsetMs: 0,
+        });
+      } else {
+        setAudioTrack((prev) =>
+          prev.source === 'embedded'
+            ? {url: null, name: '', source: null, volume: 0.85, muted: false, solo: false, offsetMs: 0}
+            : prev,
+        );
+      }
+
+      // Initialize Tempo-Trainer defaults to song's natural BPM (70% -> 100%)
       const songBpm = loadedScore.tempo || 120;
       setTrainer((prev) => ({
         ...prev,
@@ -526,15 +666,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         };
       });
       setMixerState(freshMixer);
-
-      if (onScoreMetaChange) {
-        onScoreMetaChange({
-          title: loadedScore.title || 'Unbenannte Partitur',
-          artist: loadedScore.artist || '',
-          sourceLabel:
-            loadedScore.tracks.length > 1 ? `${loadedScore.tracks.length} Spuren` : '1 Spur',
-        });
-      }
     });
 
     api.renderFinished.on(() => {
@@ -546,6 +677,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       setIsPlaying(playing);
       if (playing) {
         manualStopRef.current = false;
+      } else {
+        audioElRef.current?.pause();
       }
     });
 
@@ -553,6 +686,10 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       setCurrentTimeMs(e.currentTime);
       setEndTimeMs(e.endTime);
       setEndTick(e.endTick);
+
+      // Keep synchronized Audio-Spur tightly locked to alphaTab playback timeline!
+      const playing = apiRef.current?.playerState === 1;
+      syncAudioTrackToTime(e.currentTime, playing);
     });
 
     api.playbackRangeChanged.on((e) => {
@@ -569,8 +706,9 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       }
     });
 
-    // Handles BOTH Tempo-Trainer progressive speedup AND Count-in on every repeat!
+    // Handles Tempo-Trainer progressive speedup AND Count-in on every repeat
     api.playerFinished.on(() => {
+      audioElRef.current?.pause();
       if (manualStopRef.current) return;
 
       const looping = isLoopingRef.current;
@@ -578,7 +716,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       const currentTrainer = trainerRef.current;
       const songBpm = scoreRef.current?.tempo || 120;
 
-      // 1. Advance Tempo-Trainer if enabled & looping
       if (looping && currentTrainer.enabled) {
         const nextLoops = currentTrainer.completedLoops + 1;
         const currentBpm = Math.round(songBpm * speedRef.current);
@@ -601,8 +738,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         setTrainer((prev) => ({...prev, completedLoops: nextLoops}));
       }
 
-      // 2. If Count-in on every repeat is enabled alongside Loop, restart cleanly from loop start
-      //    so alphaTab plays its native Count-In at the (potentially newly incremented) tempo!
       if (looping && mode === 'always') {
         clearPendingRepeatRestart();
         repeatRestartTimerRef.current = window.setTimeout(() => {
@@ -617,7 +752,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     });
 
     api.activeBeatsChanged.on((args) => {
-      // Gently alternate metronome icon pendulum on each beat change
       setMetronomeTickRight((prev) => !prev);
 
       const preferredTrackIndex = selectedTrackIndexesRef.current[0] ?? 0;
@@ -643,12 +777,10 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     api.error.on((err) => {
       setIsLoadingScore(false);
       setIsSwitchingSoundFont(false);
-      const message = err?.message || 'Fehler beim Parsen oder Rendern der Partitur.';
-      setErrorBanner(message);
-      setTexError(message);
+      setErrorBanner(err?.message || 'Fehler beim Parsen oder Rendern der Partitur.');
     });
 
-    // Load initial score (active server slice, remote URL, or built-in demo)
+    // Load initial score
     if (activeSlice) {
       loadRemoteUrl(
         `/api/slices/${encodeURIComponent(activeSlice.id)}/file`,
@@ -659,17 +791,16 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       loadRemoteUrl(initialFileUrl);
     } else {
       const initialDemo = DEMO_SCORES.find((d) => d.id === demoId) ?? DEMO_SCORES[0];
-      setTexCode(initialDemo.tex);
       setSourceLabel(`Demo · ${initialDemo.label}`);
       api.tex(initialDemo.tex);
     }
 
     return () => {
       clearPendingRepeatRestart();
+      audioElRef.current?.pause();
       api.destroy();
       apiRef.current = null;
     };
-    // Intentionally initialize alphaTab once; slice/demo switches handled below
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -683,6 +814,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     if (!api || !activeSlice) return;
     manualStopRef.current = true;
     clearPendingRepeatRestart();
+    audioElRef.current?.pause();
     api.pause();
     loadRemoteUrl(
       `/api/slices/${encodeURIComponent(activeSlice.id)}/file`,
@@ -690,27 +822,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       activeSlice.ext,
     );
   }, [activeSlice, loadRemoteUrl, clearPendingRepeatRestart]);
-
-  // Switch demo when user clicks another demo
-  const prevDemoIdRef = useRef<string>(demoId);
-  useEffect(() => {
-    if (activeSlice || prevDemoIdRef.current === demoId) return;
-    prevDemoIdRef.current = demoId;
-    const api = apiRef.current;
-    if (!api) return;
-    const found = DEMO_SCORES.find((d) => d.id === demoId);
-    if (!found) return;
-    manualStopRef.current = true;
-    clearPendingRepeatRestart();
-    api.pause();
-    setErrorBanner(null);
-    setTexError(null);
-    setIsLoadingScore(true);
-    setLocalDraftFile(null);
-    setTexCode(found.tex);
-    setSourceLabel(`Demo · ${found.label}`);
-    api.tex(found.tex);
-  }, [demoId, activeSlice, clearPendingRepeatRestart]);
 
   // PostMessage API bridge for parent websites embedding the iframe
   useEffect(() => {
@@ -736,12 +847,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         }
       } else if (msg.type === 'tabslice:loadUrl' && typeof msg.url === 'string') {
         loadRemoteUrl(msg.url);
-      } else if (msg.type === 'tabslice:loadTex' && typeof msg.tex === 'string') {
-        setErrorBanner(null);
-        setIsLoadingScore(true);
-        setTexCode(msg.tex);
-        setSourceLabel('Externes alphaTex');
-        api.tex(msg.tex);
       } else if (msg.type === 'tabslice:playPause') {
         api.playPause();
       } else if (msg.type === 'tabslice:setSpeed' && typeof msg.speed === 'number') {
@@ -755,11 +860,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     return () => window.removeEventListener('message', handleMessage);
   }, [loadRemoteUrl]);
 
-  // Track Fullscreen API state
   useEffect(() => {
-    const onFsChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
-    };
+    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange', onFsChange);
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
@@ -775,13 +877,12 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
   const handleBpmChange = useCallback(
     (targetBpm: number) => {
       const clampedBpm = Math.min(320, Math.max(20, Math.round(targetBpm)));
-      const nextSpeed = clampedBpm / Math.max(1, baseTempo);
-      handleSpeedChange(nextSpeed);
+      handleSpeedChange(clampedBpm / Math.max(1, baseTempo));
     },
     [baseTempo, handleSpeedChange],
   );
 
-  // Keyboard shortcuts (Space, L, M, C, Escape, Up/Down BPM ±5)
+  // Keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -804,6 +905,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
           if (isPlaying) {
             manualStopRef.current = true;
             clearPendingRepeatRestart();
+            audioElRef.current?.pause();
             api.pause();
           } else {
             manualStopRef.current = false;
@@ -851,13 +953,14 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     clearPendingRepeatRestart,
   ]);
 
-  // Handlers
+  // Playback handlers
   const handlePlayPause = () => {
     const api = apiRef.current;
     if (!api || !isPlayerReady) return;
     if (isPlaying) {
       manualStopRef.current = true;
       clearPendingRepeatRestart();
+      audioElRef.current?.pause();
       api.pause();
     } else {
       manualStopRef.current = false;
@@ -869,15 +972,17 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
   const handleStop = () => {
     manualStopRef.current = true;
     clearPendingRepeatRestart();
+    if (audioElRef.current) {
+      audioElRef.current.pause();
+      audioElRef.current.currentTime = 0;
+    }
     if (!apiRef.current) return;
     apiRef.current.stop();
     setActiveFretNotes([]);
     setTrainer((prev) => ({...prev, completedLoops: 0}));
   };
 
-  const handleToggleLoop = () => {
-    setIsLooping((prev) => !prev);
-  };
+  const handleToggleLoop = () => setIsLooping((prev) => !prev);
 
   const handleClearRange = () => {
     if (!apiRef.current) return;
@@ -915,7 +1020,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     api.playbackSpeed = startSpeed;
     setIsLooping(true);
 
-    // Ensure count-in is active at least on repeat if user had it off
     const effectiveMode: CountInMode = countInMode === 'off' ? 'always' : countInMode;
     if (countInMode === 'off') {
       setCountInMode('always');
@@ -939,8 +1043,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     handleSpeedChange(1);
   };
 
-  // Switch SoundFont (Sonivox | FluidR3 GM Studio | MuseScore HD)
-  const handleSelectSoundFont = (sfId: Exclude<SoundFontId, 'custom'>) => {
+  // SoundFont switching
+  const handleSelectSoundFont = (sfId: SoundFontPresetId) => {
     const api = apiRef.current;
     if (!api) return;
     setActiveSoundFont(sfId);
@@ -951,7 +1055,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     try {
       window.localStorage.setItem(SOUNDFONT_STORAGE_KEY, sfId);
     } catch {
-      // Ignore storage errors
+      // Ignore
     }
     api.loadSoundFont(getSoundFontUrl(sfId), false);
   };
@@ -975,6 +1079,69 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       setErrorBanner(`SoundFont „${file.name}“ konnte nicht gelesen werden.`);
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  // Dedicated Audio-Spur / Backing Track handlers
+  const handleLoadCustomAudioTrack = (file: File) => {
+    const blobUrl = URL.createObjectURL(file);
+    setAudioTrack({
+      url: blobUrl,
+      name: file.name,
+      source: 'custom',
+      volume: 0.85,
+      muted: false,
+      solo: false,
+      offsetMs: 0,
+    });
+  };
+
+  const handleToggleAudioTrackMute = () => {
+    setAudioTrack((prev) => ({...prev, muted: !prev.muted, solo: false}));
+  };
+
+  const handleToggleAudioTrackSolo = () => {
+    const api = apiRef.current;
+    const nextSolo = !audioTrack.solo;
+    setAudioTrack((prev) => ({
+      ...prev,
+      solo: nextSolo,
+      muted: nextSolo ? false : prev.muted,
+    }));
+
+    // When soloing the Audio-Spur, mute all MIDI notation tracks; restore when un-soloing!
+    if (api && score) {
+      api.changeTrackMute(score.tracks, nextSolo);
+      setMixerState((prev) => {
+        const next: Record<number, TrackMixerState> = {...prev};
+        for (const t of score.tracks) {
+          const cur = prev[t.index] ?? {
+            volume: 1,
+            muted: false,
+            solo: false,
+            transpose: 0,
+            program: t.playbackInfo.program,
+          };
+          next[t.index] = {...cur, muted: nextSolo, solo: nextSolo ? false : cur.solo};
+        }
+        return next;
+      });
+    }
+  };
+
+  const handleRemoveAudioTrack = () => {
+    audioElRef.current?.pause();
+    if (audioTrack.solo && apiRef.current && score) {
+      apiRef.current.changeTrackMute(score.tracks, false);
+    }
+    setAudioTrack({
+      url: null,
+      name: '',
+      source: null,
+      volume: 0.85,
+      muted: false,
+      solo: false,
+      offsetMs: 0,
+    });
   };
 
   const handleMasterVolumeChange = (val: number) => {
@@ -1107,7 +1274,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     }));
   };
 
-  // Switch track instrument sound (e.g. Electric Bass Fingerstyle GM 33) live!
   const handleTrackProgramChange = (track: alphaTab.model.Track, newProgram: number) => {
     const api = apiRef.current;
     if (!api) return;
@@ -1116,9 +1282,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     track.playbackInfo.program = newProgram;
     api.loadMidiForScore();
     api.tickPosition = savedTick;
-    if (wasPlaying) {
-      api.play();
-    }
+    if (wasPlaying) api.play();
     setMixerState((prev) => ({
       ...prev,
       [track.index]: {
@@ -1134,7 +1298,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     }));
   };
 
-  // Display / view setting updaters
+  // Display settings handlers
   const handleLayoutChange = (mode: 'page' | 'horizontal') => {
     setLayoutMode(mode);
     const api = apiRef.current;
@@ -1145,23 +1309,17 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     api.render();
   };
 
-  const handleStaveProfileChange = (profile: 'default' | 'scoretab' | 'tab' | 'score') => {
+  const handleStaveProfileChange = (profile: StaveModeParam) => {
     setStaveProfile(profile);
     const api = apiRef.current;
     if (!api) return;
-    const map = {
-      default: alphaTab.StaveProfile.Default,
-      scoretab: alphaTab.StaveProfile.ScoreTab,
-      tab: alphaTab.StaveProfile.Tab,
-      score: alphaTab.StaveProfile.Score,
-    };
-    api.settings.display.staveProfile = map[profile];
+    api.settings.display.staveProfile = mapStaveProfile(profile);
     api.updateSettings();
     api.render();
   };
 
   const handleZoomChange = (newZoom: number) => {
-    const clamped = Math.max(0.6, Math.min(1.5, newZoom));
+    const clamped = Math.round(Math.max(0.6, Math.min(1.5, newZoom)) * 100) / 100;
     setZoom(clamped);
     const api = apiRef.current;
     if (!api) return;
@@ -1193,6 +1351,16 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     api.render();
   };
 
+  const handleToggleHeader = () => {
+    const next = !showHeader;
+    setShowHeader(next);
+    const api = apiRef.current;
+    if (!api) return;
+    applyScoreHeaderVisibility(api.settings, next);
+    api.updateSettings();
+    api.render();
+  };
+
   const handleToggleFullscreen = async () => {
     const el = containerRef.current;
     if (!el) return;
@@ -1203,7 +1371,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         await document.exitFullscreen();
       }
     } catch {
-      // Fullscreen may be restricted by parent iframe permissions
+      // Restricted by iframe permissions
     }
   };
 
@@ -1212,10 +1380,11 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     if (!api || endTimeMs <= 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    api.timePosition = Math.round(ratio * endTimeMs);
+    const nextMs = Math.round(ratio * endTimeMs);
+    api.timePosition = nextMs;
+    syncAudioTrackToTime(nextMs, isPlaying);
   };
 
-  // Drag and drop handlers for Guitar Pro files
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1225,9 +1394,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.currentTarget === e.target) {
-      setIsDraggingFile(false);
-    }
+    if (e.currentTarget === e.target) setIsDraggingFile(false);
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -1235,28 +1402,13 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     e.stopPropagation();
     setIsDraggingFile(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) {
+    if (!file) return;
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext === 'mp3' || ext === 'wav' || ext === 'ogg' || ext === 'm4a') {
+      handleLoadCustomAudioTrack(file);
+    } else {
       loadLocalFile(file);
     }
-  };
-
-  const handleApplyTex = () => {
-    const api = apiRef.current;
-    if (!api) return;
-    setTexError(null);
-    setErrorBanner(null);
-    setIsLoadingScore(true);
-    setSourceLabel('alphaTex Editor');
-    api.tex(texCode);
-  };
-
-  const handleResetTex = () => {
-    const demo = DEMO_SCORES.find((d) => d.id === demoId) ?? DEMO_SCORES[0];
-    setTexCode(demo.tex);
-    setTexError(null);
-    setErrorBanner(null);
-    setSourceLabel(`Demo · ${demo.label}`);
-    apiRef.current?.tex(demo.tex);
   };
 
   // Active track details for Fretboard & Header
@@ -1294,7 +1446,10 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         darkSheet ? 'bg-[#111317] text-zinc-100' : 'bg-white text-zinc-900'
       }`}
     >
-      {/* Hidden File Input for Guitar Pro / MusicXML / alphaTex */}
+      {/* Hidden synchronized HTMLAudioElement for Audio-Spur / Backing Track */}
+      {audioTrack.url && <audio ref={audioElRef} src={audioTrack.url} preload="auto" />}
+
+      {/* Hidden File Inputs */}
       <input
         ref={fileInputRef}
         type="file"
@@ -1302,14 +1457,10 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) {
-            loadLocalFile(file);
-          }
+          if (file) loadLocalFile(file);
           e.target.value = '';
         }}
       />
-
-      {/* Hidden File Input for Custom SoundFont (.sf2 / .sf3) */}
       <input
         ref={soundFontInputRef}
         type="file"
@@ -1317,138 +1468,238 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) {
-            handleUploadCustomSoundFont(file);
-          }
+          if (file) handleUploadCustomSoundFont(file);
+          e.target.value = '';
+        }}
+      />
+      <input
+        ref={audioFileInputRef}
+        type="file"
+        accept=".mp3,.wav,.ogg,.m4a,audio/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleLoadCustomAudioTrack(file);
           e.target.value = '';
         }}
       />
 
-      {/* Slim Soundslice-style Player Top Bar */}
-      <div
-        className={`flex items-center justify-between gap-4 px-4 h-11 border-b shrink-0 ${
-          darkSheet
-            ? 'bg-[#16181D] border-white/10 text-zinc-100'
-            : 'bg-[#FAFAFB] border-zinc-200 text-zinc-900'
-        }`}
-      >
-        {/* Left: Score Title & Metadata (clean unboxed separators) */}
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-semibold truncate">
-            {score?.title || 'Partitur wird geladen…'}
-          </span>
-          {score?.artist && (
-            <>
-              <span aria-hidden="true" className="text-zinc-400 hidden sm:inline">
-                ·
-              </span>
-              <span
-                className={`text-xs truncate hidden sm:inline ${
-                  darkSheet ? 'text-zinc-400' : 'text-zinc-500'
-                }`}
-              >
-                {score.artist}
-              </span>
-            </>
-          )}
-          <span aria-hidden="true" className="text-zinc-400 hidden lg:inline">
-            ·
-          </span>
-          <span
-            className={`text-xs truncate hidden lg:inline ${
-              darkSheet ? 'text-zinc-400' : 'text-zinc-500'
-            }`}
-          >
-            {sourceLabel}
-          </span>
-        </div>
+      {/* Slim Player Top Bar — Direct Settings & Song Title (hidden in embed when header=0) */}
+      {(showHeader || !isEmbedMode) && (
+        <div
+          className={`flex items-center justify-between gap-3 px-4 h-11 border-b shrink-0 ${
+            darkSheet
+              ? 'bg-[#16181D] border-white/10 text-zinc-100'
+              : 'bg-[#FAFAFB] border-zinc-200 text-zinc-900'
+          }`}
+        >
+          {/* Left: Song Title & Artist (respects showHeader cleanly) */}
+          <div className="flex items-center gap-2 min-w-0">
+            {showHeader ? (
+              <>
+                <span className="text-sm font-semibold truncate">
+                  {score?.title || 'Partitur wird geladen…'}
+                </span>
+                {score?.artist && (
+                  <>
+                    <span aria-hidden="true" className="text-zinc-400 hidden sm:inline">
+                      ·
+                    </span>
+                    <span
+                      className={`text-xs truncate hidden sm:inline ${
+                        darkSheet ? 'text-zinc-400' : 'text-zinc-500'
+                      }`}
+                    >
+                      {score.artist}
+                    </span>
+                  </>
+                )}
+                {!isEmbedMode && (
+                  <>
+                    <span aria-hidden="true" className="text-zinc-400 hidden xl:inline">
+                      ·
+                    </span>
+                    <span
+                      className={`text-xs truncate hidden xl:inline ${
+                        darkSheet ? 'text-zinc-400' : 'text-zinc-500'
+                      }`}
+                    >
+                      {sourceLabel}
+                    </span>
+                  </>
+                )}
+              </>
+            ) : (
+              <span className="text-xs text-zinc-400">Kompaktansicht (Titel ausgeblendet)</span>
+            )}
+          </div>
 
-        {/* Right: Quick Track Switcher + Load Guitar Pro File + alphaTex toggle */}
-        <div className="flex items-center gap-2 shrink-0">
-          {score && score.tracks.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setActivePopover((prev) => (prev === 'tracks' ? null : 'tracks'))}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
-                darkSheet
-                  ? 'bg-white/5 border-white/10 text-zinc-200 hover:bg-white/10'
-                  : 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
-              }`}
-              title="Spuren auswählen, Bass-Sound wählen & mischen"
-            >
-              <Layers className="w-3.5 h-3.5 text-blue-600" />
-              <span className="max-w-[140px] truncate">
-                {selectedTrackIndexes.length > 1
-                  ? `${selectedTrackIndexes.length} / ${score.tracks.length} Spuren`
-                  : primaryTrack?.name || 'Spur 1'}
-              </span>
-              <ChevronDown className="w-3 h-3 opacity-60" />
-            </button>
-          )}
-
-          {isEmbedMode && (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
-                darkSheet
-                  ? 'bg-white/5 border-white/10 text-zinc-200 hover:bg-white/10'
-                  : 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
-              }`}
-              title="Guitar-Pro-Datei öffnen (.gp, .gp3–.gp8, .gpx, .xml, .tex)"
-            >
-              <FolderOpen className="w-3.5 h-3.5 text-blue-600" />
-              <span className="hidden sm:inline">Guitar Pro laden</span>
-            </button>
-          )}
-
-          {!isEmbedMode && localDraftFile && onPublishLocalFile && (
-            <button
-              type="button"
-              onClick={() => onPublishLocalFile(localDraftFile)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors whitespace-nowrap shrink-0"
-              title="Diese Guitar-Pro-Datei auf dem Server speichern und Forum-Embed-Link erhalten"
-            >
-              <CloudUpload className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Als Forum-Link speichern</span>
-            </button>
-          )}
-
-          {!isEmbedMode && (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
-                darkSheet
-                  ? 'bg-white/5 border-white/10 text-zinc-200 hover:bg-white/10'
-                  : 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
-              }`}
-              title="Lokale Guitar-Pro-Datei schnell testen"
-            >
-              <FolderOpen className="w-3.5 h-3.5 text-blue-600" />
-              <span className="hidden md:inline">Datei testen</span>
-            </button>
-          )}
-
-          {!isEmbedMode && (
-            <button
-              type="button"
-              onClick={() => onTexDrawerOpenChange(!texDrawerOpen)}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
-                texDrawerOpen
-                  ? 'bg-blue-600 border-blue-600 text-white'
-                  : darkSheet
+          {/* Right: Direct Practice & Display Settings (no Datei testen / alphaTex clutter!) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Quick Track Selector */}
+            {score && score.tracks.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setActivePopover((prev) => (prev === 'tracks' ? null : 'tracks'))}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
+                  darkSheet
                     ? 'bg-white/5 border-white/10 text-zinc-200 hover:bg-white/10'
                     : 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
+                }`}
+                title="Spuren, Bass-Sound & Audio-Spur mischen"
+              >
+                <Layers className="w-3.5 h-3.5 text-blue-600" />
+                <span className="max-w-[130px] truncate">
+                  {selectedTrackIndexes.length > 1
+                    ? `${selectedTrackIndexes.length} / ${score.tracks.length} Spuren`
+                    : primaryTrack?.name || 'Spur 1'}
+                </span>
+                <ChevronDown className="w-3 h-3 opacity-60" />
+              </button>
+            )}
+
+            {/* Quick Notation Stave Switch (Noten+Tab / Tab / Noten) */}
+            <div
+              className={`hidden md:flex items-center p-0.5 rounded-md border text-[11px] font-medium ${
+                darkSheet
+                  ? 'bg-black/25 border-white/10'
+                  : 'bg-zinc-100 border-zinc-200/80'
               }`}
-              title="alphaTex Live-Editor ein-/ausblenden"
             >
-              <Code2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">alphaTex</span>
+              {(
+                [
+                  ['scoretab', 'Noten+Tab'],
+                  ['tab', 'Nur Tab'],
+                  ['score', 'Nur Noten'],
+                ] as const
+              ).map(([key, label]) => {
+                const isActive =
+                  staveProfile === key || (staveProfile === 'default' && key === 'scoretab');
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => handleStaveProfileChange(key)}
+                    className={`px-2 py-0.5 rounded transition-colors whitespace-nowrap ${
+                      isActive
+                        ? darkSheet
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white text-zinc-900 shadow-xs'
+                        : darkSheet
+                          ? 'text-zinc-400 hover:text-zinc-200'
+                          : 'text-zinc-600 hover:text-zinc-900'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Quick Layout Switch (Page vs Horizontal) */}
+            <button
+              type="button"
+              onClick={() => handleLayoutChange(layoutMode === 'page' ? 'horizontal' : 'page')}
+              className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
+                darkSheet
+                  ? 'bg-white/5 border-white/10 text-zinc-200 hover:bg-white/10'
+                  : 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
+              }`}
+              title={
+                layoutMode === 'page'
+                  ? 'Zu Horizontal-Streifen wechseln'
+                  : 'Zu Seitenansicht wechseln'
+              }
+            >
+              {layoutMode === 'page' ? (
+                <Rows3 className="w-3.5 h-3.5 text-zinc-500" />
+              ) : (
+                <Columns2 className="w-3.5 h-3.5 text-blue-600" />
+              )}
+              <span className="hidden lg:inline">
+                {layoutMode === 'page' ? 'Seite' : 'Horizontal'}
+              </span>
             </button>
-          )}
+
+            {/* Quick Zoom Controls */}
+            <div
+              className={`hidden lg:flex items-center rounded-md border ${
+                darkSheet
+                  ? 'bg-white/5 border-white/10 text-zinc-200'
+                  : 'bg-white border-zinc-200 text-zinc-700'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => handleZoomChange(zoom - 0.1)}
+                className="p-1 hover:bg-black/5 rounded-l-md"
+                title="Verkleinern"
+                aria-label="Verkleinern"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <span className="px-1.5 text-[11px] font-mono tabular-nums">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => handleZoomChange(zoom + 0.1)}
+                className="p-1 hover:bg-black/5 rounded-r-md"
+                title="Vergrößern"
+                aria-label="Vergrößern"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* Publish locally dropped file to Server */}
+            {!isEmbedMode && localDraftFile && onPublishLocalFile && (
+              <button
+                type="button"
+                onClick={() => onPublishLocalFile(localDraftFile)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors whitespace-nowrap shrink-0"
+              >
+                <CloudUpload className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Als Forum-Link speichern</span>
+              </button>
+            )}
+
+            {/* Studio 500px Embed Preview Toggle */}
+            {!isEmbedMode && onToggleEmbedPreview && (
+              <button
+                type="button"
+                onClick={onToggleEmbedPreview}
+                className={`hidden xl:inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
+                  embedPreviewMode
+                    ? 'bg-blue-600 border-blue-600 text-white'
+                    : darkSheet
+                      ? 'bg-white/5 border-white/10 text-zinc-200 hover:bg-white/10'
+                      : 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
+                }`}
+                title="500px Forum-Iframe-Vorschau ein-/ausschalten"
+              >
+                500px Vorschau
+              </button>
+            )}
+
+            {/* In embed mode, allow opening a local file directly if desired */}
+            {isEmbedMode && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
+                  darkSheet
+                    ? 'bg-white/5 border-white/10 text-zinc-200 hover:bg-white/10'
+                    : 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
+                }`}
+                title="Eigene Guitar-Pro-Datei laden"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-blue-600" />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Error Banner */}
       {errorBanner && (
@@ -1465,9 +1716,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         </div>
       )}
 
-      {/* Main Content Area: Score Canvas + Optional alphaTex Side Drawer */}
+      {/* Main Scrollable Score Canvas */}
       <div className="relative flex-1 min-h-0 flex overflow-hidden">
-        {/* Scrollable Score Viewport */}
         <div
           ref={viewportRef}
           onClick={() => {
@@ -1477,7 +1727,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
             darkSheet ? 'bg-[#111317] at-surface-dark' : 'bg-white'
           }`}
         >
-          {/* Loading Indicator */}
           {isLoadingScore && (
             <div
               className={`absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 ${
@@ -1491,7 +1740,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
             </div>
           )}
 
-          {/* Subtle practice hint & score tempo readout */}
+          {/* Subtle practice hint & tempo info */}
           {!isLoadingScore && score && (
             <div
               className={`px-6 pt-3 pb-1 flex items-center justify-between text-[11px] ${
@@ -1502,9 +1751,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
               <span className="hidden sm:inline font-mono tabular-nums">
                 {score.masterBars.length} Takte · {effectiveBpm} BPM
                 {effectiveBpm !== baseTempo ? ` (Original ${baseTempo} BPM)` : ''}
-                {trainer.enabled
-                  ? ` · Trainer ${trainer.startBpm}→${trainer.targetBpm} BPM`
-                  : ''}
+                {trainer.enabled ? ` · Trainer ${trainer.startBpm}→${trainer.targetBpm} BPM` : ''}
               </span>
             </div>
           )}
@@ -1512,36 +1759,50 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
           {/* alphaTab SVG Mount Element */}
           <div
             ref={mountRef}
-            className={`px-4 sm:px-8 pb-12 ${layoutMode === 'horizontal' ? 'min-h-[260px]' : ''}`}
+            className={`px-4 sm:px-8 pb-6 ${layoutMode === 'horizontal' ? 'min-h-[240px]' : ''}`}
           />
+
+          {/* Quiet alphaTab / alphaTex & SoundFont Attribution inside sheet scroll area */}
+          {!isLoadingScore && (
+            <div
+              className={`px-6 pb-5 pt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] border-t ${
+                darkSheet
+                  ? 'border-white/5 text-zinc-500'
+                  : 'border-zinc-100 text-zinc-400'
+              }`}
+            >
+              <span>
+                Powered by{' '}
+                <a
+                  href="https://alphatab.net"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:underline font-medium"
+                >
+                  alphaTab
+                </a>{' '}
+                (Guitar Pro &amp; alphaTex)
+              </span>
+              <span>SoundFont: {getSoundFontLabel(activeSoundFont, customSoundFontName)}</span>
+            </div>
+          )}
         </div>
 
-        {/* Collapsible alphaTex Live Editor Drawer */}
-        <AlphaTexDrawer
-          isOpen={texDrawerOpen && !isEmbedMode}
-          value={texCode}
-          onChange={setTexCode}
-          onApply={handleApplyTex}
-          onReset={handleResetTex}
-          onClose={() => onTexDrawerOpenChange(false)}
-          errorMessage={texError}
-        />
-
-        {/* Drag & Drop Guitar Pro Overlay */}
+        {/* Drag & Drop Overlay (Guitar Pro OR MP3/WAV Audio-Spur) */}
         {isDraggingFile && (
           <div className="absolute inset-0 z-40 flex items-center justify-center bg-blue-600/12 backdrop-blur-[2px] border-2 border-dashed border-blue-600 m-2 rounded-xl pointer-events-none">
             <div className="bg-white/95 text-zinc-900 px-6 py-5 rounded-xl shadow-lg border border-zinc-200 flex flex-col items-center gap-2 text-center">
               <Upload className="w-6 h-6 text-blue-600" />
-              <p className="text-sm font-semibold">Guitar-Pro-Datei hier ablegen</p>
+              <p className="text-sm font-semibold">Guitar-Pro-Datei oder Audio-Spur ablegen</p>
               <p className="text-xs text-zinc-500">
-                Unterstützt .gp, .gp3, .gp4, .gp5, .gpx, .gp7, .gp8, MusicXML &amp; alphaTex
+                .gp, .gp3–.gp8, .gpx, MusicXML, .tex — oder MP3/WAV/OGG als Backing-Track
               </p>
             </div>
           </div>
         )}
       </div>
 
-      {/* Collapsible Live Fretboard Visualizer (above the dark transport dock) */}
+      {/* Collapsible Live Fretboard Visualizer */}
       {showFretboard && primaryTrack && (
         <FretboardVisualizer
           tuning={primaryTrackTuning}
@@ -1554,15 +1815,15 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
 
       {/* Soundslice-Inspired Dark Bottom Transport & Practice Dock */}
       <div className="relative bg-[#14161A] text-zinc-100 border-t border-white/10 shrink-0 select-none">
-        {/* Popover: Tracks, Mixer & Instrument Sound (incl. Electric Bass Fingerstyle) */}
+        {/* Popover: Tracks, Mixer, Dedicated Audio-Spur & Metronome Channel */}
         {activePopover === 'tracks' && score && (
           <div
-            className="absolute bottom-full right-3 mb-2 w-[360px] max-w-[calc(100vw-24px)] bg-[#1A1D23] border border-white/12 rounded-xl shadow-2xl overflow-hidden z-30"
+            className="absolute bottom-full right-3 mb-2 w-[370px] max-w-[calc(100vw-24px)] bg-[#1A1D23] border border-white/12 rounded-xl shadow-2xl overflow-hidden z-30"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10">
               <span className="text-xs font-semibold text-zinc-100">
-                Spuren, Mixer &amp; Instrumente ({score.tracks.length})
+                Spuren, Audio-Track &amp; Mixer
               </span>
               <div className="flex items-center gap-2">
                 {score.tracks.length > 1 && (
@@ -1583,7 +1844,130 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                 </button>
               </div>
             </div>
-            <div className="max-h-80 overflow-y-auto divide-y divide-white/8 score-scroll">
+
+            <div className="max-h-96 overflow-y-auto divide-y divide-white/8 score-scroll">
+              {/* Dedicated Audio-Spur / Backing-Track Row */}
+              <div className="px-4 py-3 bg-white/[0.025] space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileAudio className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    <span className="text-xs font-semibold text-zinc-100 truncate">
+                      {audioTrack.url ? audioTrack.name : 'Audio-Spur (Backing-Track)'}
+                    </span>
+                  </div>
+                  {audioTrack.url ? (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleToggleAudioTrackSolo}
+                        className={`w-6 h-6 text-[11px] font-mono font-semibold rounded transition-colors ${
+                          audioTrack.solo
+                            ? 'bg-amber-500 text-zinc-950'
+                            : 'bg-white/8 text-zinc-300 hover:bg-white/15'
+                        }`}
+                        title="Audio-Spur Solo (schaltet MIDI-Spuren stumm)"
+                      >
+                        S
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleToggleAudioTrackMute}
+                        className={`w-6 h-6 text-[11px] font-mono font-semibold rounded transition-colors ${
+                          audioTrack.muted
+                            ? 'bg-red-500 text-white'
+                            : 'bg-white/8 text-zinc-300 hover:bg-white/15'
+                        }`}
+                        title="Audio-Spur stummschalten"
+                      >
+                        M
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRemoveAudioTrack}
+                        className="w-6 h-6 rounded bg-white/8 text-zinc-400 hover:text-white hover:bg-white/15 flex items-center justify-center"
+                        title="Audio-Spur entfernen"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => audioFileInputRef.current?.click()}
+                      className="px-2.5 py-1 text-[11px] font-medium text-blue-300 bg-blue-600/20 hover:bg-blue-600/30 rounded-md transition-colors whitespace-nowrap"
+                    >
+                      + MP3/WAV laden
+                    </button>
+                  )}
+                </div>
+
+                {audioTrack.url ? (
+                  <div className="space-y-1.5 pl-5">
+                    <div className="flex items-center gap-2">
+                      <Volume2 className="w-3 h-3 text-zinc-500 shrink-0" />
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={audioTrack.volume}
+                        onChange={(e) =>
+                          setAudioTrack((prev) => ({
+                            ...prev,
+                            volume: parseFloat(e.target.value),
+                            muted: false,
+                          }))
+                        }
+                        className="dock-range flex-1"
+                        aria-label="Lautstärke Audio-Spur"
+                      />
+                      <span className="text-[10px] font-mono tabular-nums text-zinc-300 w-8 text-right">
+                        {Math.round(audioTrack.volume * 100)}%
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                      <span>Sync-Versatz</span>
+                      <div className="flex items-center gap-1 font-mono tabular-nums">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAudioTrack((prev) => ({
+                              ...prev,
+                              offsetMs: prev.offsetMs - 50,
+                            }))
+                          }
+                          className="px-1.5 py-0.5 rounded bg-white/8 hover:bg-white/15 text-zinc-200"
+                        >
+                          -50ms
+                        </button>
+                        <span className="w-14 text-center text-zinc-300">
+                          {audioTrack.offsetMs >= 0
+                            ? `+${audioTrack.offsetMs}ms`
+                            : `${audioTrack.offsetMs}ms`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAudioTrack((prev) => ({
+                              ...prev,
+                              offsetMs: prev.offsetMs + 50,
+                            }))
+                          }
+                          className="px-1.5 py-0.5 rounded bg-white/8 hover:bg-white/15 text-zinc-200"
+                        >
+                          +50ms
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-zinc-500 pl-5">
+                    GP7/8-Backing-Tracks erscheinen hier automatisch, oder lade eine eigene MP3/WAV-Spur mit eigener Lautstärke &amp; Mute.
+                  </p>
+                )}
+              </div>
+
+              {/* Notation / MIDI Instrument Tracks */}
               {score.tracks.map((track) => {
                 const isVisible = selectedTrackIndexes.includes(track.index);
                 const isPerc = Boolean(track.staves[0]?.isPercussion);
@@ -1683,10 +2067,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                           >
                             -
                           </button>
-                          <span
-                            className="text-[10px] font-mono tabular-nums text-zinc-300 w-7 text-center"
-                            title="Transposition in Halbtönen"
-                          >
+                          <span className="text-[10px] font-mono tabular-nums text-zinc-300 w-7 text-center">
                             {state.transpose > 0 ? `+${state.transpose}` : state.transpose}st
                           </span>
                           <button
@@ -1701,7 +2082,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                       )}
                     </div>
 
-                    {/* Per-Track Sound / Bass Fingerstyle Selector */}
                     {!isPerc && (
                       <div className="pl-5 pt-0.5">
                         <select
@@ -1728,6 +2108,44 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                   </div>
                 );
               })}
+
+              {/* Metronome Channel Row in Mixer */}
+              <div className="px-4 py-2.5 space-y-2 bg-white/[0.015]">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <MetronomeIcon className="w-3.5 h-3.5 text-zinc-400" />
+                    <span className="text-xs font-medium text-zinc-200">Metronom</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleToggleMetronome}
+                    className={`w-6 h-6 text-[11px] font-mono font-semibold rounded transition-colors ${
+                      !metronomeOn
+                        ? 'bg-red-500 text-white'
+                        : 'bg-white/8 text-zinc-300 hover:bg-white/15'
+                    }`}
+                    title={metronomeOn ? 'Metronom stummschalten' : 'Metronom aktivieren'}
+                  >
+                    M
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 pl-5">
+                  <Volume2 className="w-3 h-3 text-zinc-500 shrink-0" />
+                  <input
+                    type="range"
+                    min={0.1}
+                    max={1}
+                    step={0.05}
+                    value={metronomeVolume}
+                    onChange={(e) => handleMetronomeVolumeChange(parseFloat(e.target.value))}
+                    className="dock-range flex-1"
+                    aria-label="Metronom-Lautstärke"
+                  />
+                  <span className="text-[10px] font-mono tabular-nums text-zinc-400 w-8 text-right">
+                    {Math.round(metronomeVolume * 100)}%
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1738,7 +2156,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
             className="absolute bottom-full left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-24 mb-2 w-[330px] max-w-[calc(100vw-24px)] bg-[#1A1D23] border border-white/12 rounded-xl shadow-2xl p-4 space-y-4 z-30"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header + Segmented Tabs */}
             <div className="flex items-center justify-between gap-2">
               <div className="grid grid-cols-2 gap-1 p-1 bg-black/35 rounded-lg flex-1">
                 <button
@@ -1776,7 +2193,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
 
             {tempoTab === 'tempo' ? (
               <div className="space-y-4">
-                {/* Direct Numeric BPM Input + +/-5 Steppers */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="text-zinc-400">Tempo (BPM)</span>
@@ -1794,7 +2210,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                       type="button"
                       onClick={() => handleBpmChange(effectiveBpm - 5)}
                       className="px-2.5 h-9 rounded-lg bg-white/8 hover:bg-white/15 text-xs font-mono tabular-nums text-zinc-200 shrink-0"
-                      title="5 BPM langsamer"
                     >
                       -5
                     </button>
@@ -1823,14 +2238,12 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                       type="button"
                       onClick={() => handleBpmChange(effectiveBpm + 5)}
                       className="px-2.5 h-9 rounded-lg bg-white/8 hover:bg-white/15 text-xs font-mono tabular-nums text-zinc-200 shrink-0"
-                      title="5 BPM schneller"
                     >
                       +5
                     </button>
                   </div>
                 </div>
 
-                {/* Percentage Slider & Presets */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="text-zinc-400">Geschwindigkeit</span>
@@ -1866,7 +2279,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                   </div>
                 </div>
 
-                {/* Count-In Mode Selector (Off / First / Every Repeat) */}
                 <div className="space-y-1.5 pt-2 border-t border-white/10">
                   <span className="block text-[11px] text-zinc-400">Einzähler (Count-in)</span>
                   <div className="grid grid-cols-3 gap-1 p-1 bg-black/35 rounded-lg">
@@ -1892,35 +2304,13 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                     ))}
                   </div>
                 </div>
-
-                {/* Metronome Volume */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-zinc-400">Metronom-Lautstärke</span>
-                    <span className="font-mono tabular-nums text-zinc-300">
-                      {Math.round(metronomeVolume * 100)}%
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0.1}
-                    max={1}
-                    step={0.05}
-                    value={metronomeVolume}
-                    onChange={(e) => handleMetronomeVolumeChange(parseFloat(e.target.value))}
-                    className="dock-range w-full"
-                    aria-label="Metronom-Lautstärke"
-                  />
-                </div>
               </div>
             ) : (
-              /* Tempo-Trainer Panel */
               <div className="space-y-3.5">
                 <p className="text-[11px] text-zinc-400 leading-relaxed">
                   Steigert das Tempo automatisch nach jeder Loop-Wiederholung. Ziehe im Notenblatt einen A–B-Bereich auf oder trainiere das ganze Stück.
                 </p>
 
-                {/* Start BPM & Target BPM */}
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>
                     <label className="block text-[11px] text-zinc-400 mb-1">
@@ -1966,7 +2356,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                   </div>
                 </div>
 
-                {/* Step BPM & Repeat Every N Loops */}
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>
                     <label className="block text-[11px] text-zinc-400 mb-1">
@@ -1991,9 +2380,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">
-                      Alle N Loops
-                    </label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">Alle N Loops</label>
                     <div className="grid grid-cols-3 gap-1">
                       {[1, 2, 4].map((rep) => (
                         <button
@@ -2013,7 +2400,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                   </div>
                 </div>
 
-                {/* Repeat Count-in checkbox inside Trainer */}
                 <label className="flex items-center gap-2 text-xs text-zinc-200 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -2055,15 +2441,15 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
           </div>
         )}
 
-        {/* Popover: View Settings & Studio SoundFont Selector */}
+        {/* Popover: SoundFont (GeneralUser GS 2.0.3 Default) & Display Settings */}
         {activePopover === 'view' && (
           <div
-            className="absolute bottom-full right-3 mb-2 w-80 max-w-[calc(100vw-24px)] bg-[#1A1D23] border border-white/12 rounded-xl shadow-2xl p-4 space-y-4 z-30 max-h-[75vh] overflow-y-auto score-scroll"
+            className="absolute bottom-full right-3 mb-2 w-80 max-w-[calc(100vw-24px)] bg-[#1A1D23] border border-white/12 rounded-xl shadow-2xl p-4 space-y-4 z-30 max-h-[76vh] overflow-y-auto score-scroll"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-zinc-100">
-                SoundFont &amp; Ansicht
+                SoundFont &amp; Einstellungen
               </span>
               <button
                 type="button"
@@ -2074,12 +2460,12 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
               </button>
             </div>
 
-            {/* Studio SoundFont Selector */}
+            {/* SoundFont Selector */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="inline-flex items-center gap-1.5 text-zinc-300 font-medium">
                   <AudioLines className="w-3.5 h-3.5 text-blue-400" />
-                  SoundFont (Audio-Qualität)
+                  SoundFont
                 </span>
                 {isSwitchingSoundFont && (
                   <span className="font-mono tabular-nums text-blue-400">
@@ -2128,6 +2514,17 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
             </div>
 
             <div className="border-t border-white/10 pt-3 space-y-3">
+              {/* Show/Hide Song Title Header */}
+              <label className="flex items-center justify-between text-xs text-zinc-200 cursor-pointer select-none">
+                <span>Songtitel &amp; Kopfzeile anzeigen</span>
+                <input
+                  type="checkbox"
+                  checked={showHeader}
+                  onChange={handleToggleHeader}
+                  className="accent-blue-500 rounded"
+                />
+              </label>
+
               {/* Layout */}
               <div className="space-y-1.5">
                 <span className="block text-[11px] text-zinc-400">Layout</span>
@@ -2259,7 +2656,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
           </div>
         )}
 
-        {/* Full-Width Interactive Progress Scrubber along the top edge of the dock */}
+        {/* Full-Width Interactive Progress Scrubber */}
         <div
           onClick={handleSeekBarClick}
           className="relative h-2 w-full bg-white/10 cursor-pointer group hover:h-2.5 transition-[height]"
@@ -2269,14 +2666,12 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
           aria-valuemax={Math.round(endTimeMs / 1000)}
           aria-valuenow={Math.round(currentTimeMs / 1000)}
         >
-          {/* A-B Loop Range Highlight */}
           {playbackRange && (
             <div
               className="absolute top-0 bottom-0 bg-amber-400/45 border-x border-amber-300"
               style={{left: `${rangeStartPct}%`, width: `${rangeWidthPct}%`}}
             />
           )}
-          {/* Playhead Fill */}
           <div
             className="absolute top-0 bottom-0 left-0 bg-blue-500 transition-[width] duration-75"
             style={{width: `${progressPercent}%`}}
@@ -2361,9 +2756,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
             )}
           </div>
 
-          {/* Center / Right: BPM & Tempo-Trainer, Metronome (custom icon!), Count-In (1x / Jeder Loop), Volume, Fretboard, Mixer, SoundFont/View, Fullscreen */}
+          {/* Right: BPM & Tempo-Trainer, Metronome, Count-In, Volume, Fretboard, Mixer, Settings, Fullscreen */}
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {/* BPM + Tempo-Trainer Button */}
             <button
               type="button"
               onClick={() => setActivePopover((prev) => (prev === 'speed' ? null : 'speed'))}
@@ -2381,13 +2775,10 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
               )}
               <span className="font-semibold">{effectiveBpm} BPM</span>
               <span className="hidden sm:inline text-zinc-400">
-                {trainer.enabled
-                  ? `→ ${trainer.targetBpm}`
-                  : `(${Math.round(speed * 100)}%)`}
+                {trainer.enabled ? `→ ${trainer.targetBpm}` : `(${Math.round(speed * 100)}%)`}
               </span>
             </button>
 
-            {/* Custom Pyramid Metronome Button */}
             <button
               type="button"
               onClick={handleToggleMetronome}
@@ -2406,7 +2797,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
               <span className="hidden xl:inline">Metronom</span>
             </button>
 
-            {/* 3-State Count-In Button (Aus / 1× Start / Jeder Loop) */}
             <button
               type="button"
               onClick={handleCycleCountIn}
@@ -2415,7 +2805,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                   ? 'bg-blue-600/25 text-blue-300 hover:bg-blue-600/35'
                   : 'text-zinc-400 hover:text-white hover:bg-white/10'
               }`}
-              title={`Einzähler (C): ${countInLabel} — Klicken zum Wechseln (Aus / 1× am Anfang / Bei jeder Wiederholung)`}
+              title={`Einzähler (C): ${countInLabel} — Klicken zum Wechseln`}
             >
               <span>1-2-3-4</span>
               <span className="text-[10px] font-sans opacity-80">
@@ -2423,7 +2813,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
               </span>
             </button>
 
-            {/* Master Volume */}
             <div className="hidden 2xl:flex items-center gap-1.5 px-1.5">
               <button
                 type="button"
@@ -2451,7 +2840,6 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
 
             <div className="w-px h-5 bg-white/10 mx-0.5 hidden sm:block" />
 
-            {/* Live Fretboard Toggle */}
             <button
               type="button"
               onClick={() => setShowFretboard((prev) => !prev)}
@@ -2466,46 +2854,34 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
               <span className="hidden lg:inline">Griffbrett</span>
             </button>
 
-            {/* Track Mixer & Bass Sound Button */}
             <button
               type="button"
               onClick={() => setActivePopover((prev) => (prev === 'tracks' ? null : 'tracks'))}
               className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors shrink-0 ${
-                activePopover === 'tracks'
+                activePopover === 'tracks' || audioTrack.url
                   ? 'bg-white/15 text-white'
                   : 'text-zinc-300 hover:text-white hover:bg-white/10'
               }`}
-              title="Spuren, Mixer & Instrumentensound (inkl. Bass Fingerstyle)"
-              aria-label="Spuren und Mixer"
+              title="Spuren, Audio-Track & Mixer"
+              aria-label="Spuren, Audio-Track und Mixer"
             >
               <Layers className="w-4 h-4" />
             </button>
 
-            {/* SoundFont & View Settings Button */}
             <button
               type="button"
               onClick={() => setActivePopover((prev) => (prev === 'view' ? null : 'view'))}
               className={`h-9 px-2 rounded-lg inline-flex items-center gap-1.5 text-xs transition-colors shrink-0 ${
-                activePopover === 'view' || activeSoundFont !== 'sonivox'
+                activePopover === 'view'
                   ? 'bg-white/15 text-white'
                   : 'text-zinc-300 hover:text-white hover:bg-white/10'
               }`}
-              title="SoundFont (FluidR3 Studio / MuseScore HD) & Ansicht"
-              aria-label="SoundFont und Ansicht"
+              title="SoundFont (GeneralUser GS 2.0.3) & Einstellungen"
+              aria-label="SoundFont und Einstellungen"
             >
               <SlidersHorizontal className="w-4 h-4 shrink-0" />
-              {activeSoundFont !== 'sonivox' && (
-                <span className="hidden xl:inline text-[11px] text-blue-300 font-medium">
-                  {activeSoundFont === 'fluidr3'
-                    ? 'FluidR3'
-                    : activeSoundFont === 'musescore'
-                      ? 'HD'
-                      : 'SF'}
-                </span>
-              )}
             </button>
 
-            {/* Fullscreen Button */}
             <button
               type="button"
               onClick={handleToggleFullscreen}
