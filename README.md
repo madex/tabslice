@@ -314,6 +314,64 @@ Viele Panels (Plesk, cPanel mit Node.js-Selector, Railway, Render, Coolify) biet
 an. Build-Command `npm run build`, Start-Command `npm start`, persistente Volumes für
 `data/` und `scores/` mounten.
 
+### Variante C: Docker / Docker Compose
+
+Voraussetzungen: Docker mit Compose-Plugin. Im Projektverzeichnis:
+
+```bash
+cp .env.example .env
+# ADMIN_PASSWORD in .env setzen (oder ADMIN_PASSWORD_HASH verwenden)
+# Wichtig: nicht das Beispiel-Passwort "change-me..." stehen lassen!
+
+mkdir -p data scores
+# Nur unter Linux nötig, wenn die Ordner dem Host-User gehören:
+sudo chown -R 1000:1000 data scores
+
+docker compose up -d --build
+docker compose logs -f
+```
+
+Der Player läuft danach auf `http://<server>:3000`. Ein anderer Host-Port lässt sich
+ohne Änderung der Compose-Datei setzen:
+
+```bash
+TABSLICE_PORT=8080 docker compose up -d
+```
+
+Ohne Compose geht es auch direkt:
+
+```bash
+docker build -t tabslice .
+docker run -d --name tabslice --restart unless-stopped \
+  -p 3000:3000 --env-file .env \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/scores:/app/scores" \
+  tabslice
+```
+
+Wichtig:
+
+- `data/` (Uploads, Index, SoundFont-Cache) und `scores/` (Drop-Ordner) sind
+  Bind-Mounts und bleiben beim Neustart/Update erhalten.
+- Der Container läuft als Benutzer `node` (UID 1000). Unter Linux müssen `data/` und
+  `scores/` für diese UID schreibbar sein (siehe `chown` oben).
+- Hinter nginx/Caddy `TRUST_PROXY=1` und `COOKIE_SECURE=1` setzen. Bei direktem
+  HTTP-Zugriff ohne TLS `COOKIE_SECURE=0` setzen, sonst schlägt der Admin-Login fehl.
+- Update:
+
+  ```bash
+  git pull
+  docker compose up -d --build
+  ```
+
+- Stoppen:
+
+  ```bash
+  docker compose down
+  ```
+
+- Backup: einfach `data/` und `scores/` sichern. Die Container selbst sind zustandslos.
+
 ### nginx davor
 
 ```nginx
@@ -384,6 +442,9 @@ werden, ohne den Node-Betrieb zu verändern.
 
 ```text
 server.ts                      Express-API, Auth, UUIDs, alphaTab-Metadaten
+Dockerfile                     Multi-Stage-Build für den Produktionsbetrieb
+docker-compose.yml             Container mit Port, Env und persistenten Volumes
+.dockerignore                  Hält node_modules, data/ und scores/ aus dem Image
 src/
   App.tsx                      Routing, Admin-Session, Ansichten
   components/
