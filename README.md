@@ -90,6 +90,23 @@ Den Hash in `.env` eintragen. `ADMIN_PASSWORD_HASH` hat Vorrang vor `ADMIN_PASSW
 > Start ein **temporäres Zufallspasswort** und schreibt es einmal in die Konsole. Das ist
 > nur für lokale Tests gedacht und nach einem Neustart ungültig.
 
+### Embed lokal testen
+
+Eine kleine Testseite mit Iframe bringt der Server mit:
+
+```text
+http://localhost:3000/examples/embed-test.html?id=<uuid>
+```
+
+Ohne `id` wird die Demo-Partitur geladen. Die Seite wird **vom Server** ausgeliefert und
+funktioniert deshalb ohne Zusatz-Setup.
+
+> **Nicht per Doppelklick (`file://`) öffnen.** Eine lokale HTML-Datei kann den Slice
+> nicht einbetten: Der Browser blockiert das Iframe wegen `frame-ancestors`
+> (`file://` ist eine undurchsichtige Origin, `*` deckt nur Netzwerk-Schemata ab), und
+> relative URLs wie `/slices/…` haben ohne Server kein Ziel. Immer über
+> `http://localhost:3000/...` testen.
+
 ---
 
 ## Admin und öffentliche Slice-Links
@@ -158,7 +175,8 @@ dist/                          Produktions-Build des Frontends
 - `scores/` wird bei jedem Bibliotheksaufruf neu gescannt. Änderungen per FTP sind sofort
   sichtbar (Refresh-Button in der Bibliothek).
 - `data/slices/index.json` und `data/slices/folder-ids.json` sind die einzige „Datenbank“.
-  Beide Dateien werden atomar (temp + rename) geschrieben.
+  Beide Dateien werden atomar (temp + rename) geschrieben und beim ersten Start
+  automatisch angelegt. Sie gehören zu den Laufzeitdaten und sind nicht im Repository.
 - **Backup:** `data/` und `scores/` gemeinsam sichern. Der Rest ist aus dem Repository
   reproduzierbar.
 
@@ -378,6 +396,7 @@ src/
   data/demoScores.ts           eingebaute Demo-Partituren
 scores/                        Drop-Ordner
 data/                          Uploads, Index, SoundFont-Cache
+examples/embed-test.html       Iframe-Testseite (/examples/embed-test.html)
 scripts/hash-password.mjs      scrypt-Hash erzeugen
 ```
 
@@ -410,7 +429,7 @@ Nützliche URLs:
 | Datei im Drop-Ordner erscheint nicht | Nur erlaubte Endungen, Bibliothek aktualisieren. Bei fehlenden Rechten: `scores/` muss lesbar sein. |
 | SoundFont lädt nicht | Einmaliger Download benötigt Internet. Prüfe Schreibrechte auf `data/soundfonts/`. |
 | Download/Upload bricht bei großen Dateien ab | Reverse-Proxy-Limit erhöhen (`client_max_body_size 30M`) und 25-MB-Limit der App beachten. |
-| Iframe bleibt leer | `EMBED_FRAME_ANCESTORS` prüfen, HTTPS-Mischinhalte vermeiden. |
+| Iframe bleibt leer | `EMBED_FRAME_ANCESTORS` prüfen, HTTPS-Mischinhalte vermeiden. Die Testseite über `http://localhost:3000/examples/embed-test.html?id=<uuid>` aufrufen, nicht per `file://`. |
 
 ---
 

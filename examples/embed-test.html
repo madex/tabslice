@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TabSlice – Embed-Testseite</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: #f4f5f7;
+        color: #18181b;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 8px;
+      }
+      p {
+        font-size: 13px;
+        line-height: 1.6;
+        color: #52525b;
+        margin: 0 0 20px;
+      }
+      form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 20px;
+      }
+      input {
+        flex: 1 1 340px;
+        padding: 8px 12px;
+        font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+        border: 1px solid #d4d4d8;
+        border-radius: 8px;
+        background: #fff;
+      }
+      button {
+        padding: 8px 16px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #fff;
+        background: #2563eb;
+        border: 0;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #1d4ed8;
+      }
+      .stage {
+        height: 500px;
+        background: #fff;
+        border: 1px solid #e4e4e7;
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      iframe {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+      code {
+        font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #e4e4e7;
+        padding: 1px 5px;
+        border-radius: 4px;
+      }
+      .hint {
+        margin-top: 16px;
+        padding: 12px 14px;
+        font-size: 12px;
+        line-height: 1.6;
+        color: #92400e;
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        border-radius: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>TabSlice – Embed-Testseite</h1>
+      <p>
+        Diese Seite wird vom TabSlice-Server ausgeliefert und bettet einen Slice per
+        <code>&lt;iframe&gt;</code> ein. Aufruf mit
+        <code>/examples/embed-test.html?id=&lt;uuid&gt;</code>; ohne <code>id</code> wird die
+        Demo-Partitur geladen.
+      </p>
+
+      <form id="form">
+        <input
+          id="slice-id"
+          type="text"
+          spellcheck="false"
+          placeholder="Slice-UUID, z. B. b8907ffd-9c7b-45cf-aa17-a99c0857d65d"
+          aria-label="Slice-UUID"
+        />
+        <button type="submit">Laden</button>
+      </form>
+
+      <div class="stage">
+        <iframe
+          id="player"
+          title="TabSlice-Slice"
+          allowfullscreen=""
+          referrerpolicy="strict-origin-when-cross-origin"
+        ></iframe>
+      </div>
+
+      <div class="hint">
+        Diese Seite muss über <strong>http://</strong> oder <strong>https://</strong> geöffnet
+        werden (z. B. <code>http://localhost:3000/examples/embed-test.html</code>). Direkt als
+        Datei per <code>file://</code> geöffnet, blockiert der Browser das Einbetten – und
+        relative Links wie <code>/slices/…</code> finden keinen Server.
+      </div>
+    </main>
+
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var input = document.getElementById('slice-id');
+        var frame = document.getElementById('player');
+        var id = (params.get('id') || '').trim();
+
+        function load(value) {
+          var target = value
+            ? '/slices/' + encodeURIComponent(value) + '/embed/?header=0'
+            : '/?embed=1&header=0';
+          frame.src = target;
+          window.history.replaceState(null, '', value ? '?id=' + encodeURIComponent(value) : '?');
+        }
+
+        input.value = id;
+        load(id);
+
+        document.getElementById('form').addEventListener('submit', function (event) {
+          event.preventDefault();
+          load(input.value.trim());
+        });
+      })();
+    </script>
+  </body>
+</html>

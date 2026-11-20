@@ -26,6 +26,7 @@ const INDEX_FILE = path.join(DATA_DIR, 'index.json');
 const FOLDER_ID_FILE = path.join(DATA_DIR, 'folder-ids.json');
 const SCORES_DIR = path.resolve(__dirname, 'scores');
 const SOUNDFONTS_DIR = path.resolve(__dirname, 'data', 'soundfonts');
+const EXAMPLES_DIR = path.resolve(__dirname, 'examples');
 
 const ADMIN_COOKIE = 'tabslice_admin';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -608,6 +609,7 @@ async function startServer() {
     if (
       req.path.startsWith('/api/') ||
       req.path.startsWith('/slices/') ||
+      req.path.startsWith('/examples/') ||
       req.path === '/admin'
     ) {
       res.setHeader('X-Robots-Tag', 'noindex, nofollow');
@@ -642,8 +644,17 @@ async function startServer() {
   app.get('/robots.txt', (_req: Request, res: Response) => {
     res
       .type('text/plain')
-      .send('User-agent: *\nDisallow: /slices/\nDisallow: /api/\nDisallow: /admin\n');
+      .send(
+        'User-agent: *\nDisallow: /slices/\nDisallow: /api/\nDisallow: /admin\nDisallow: /examples/\n',
+      );
   });
+
+  // Small static helpers (e.g. the iframe test page). They only reference
+  // public slice URLs and belong to the app, so they cannot live in scores/.
+  app.use(
+    '/examples',
+    express.static(EXAMPLES_DIR, {index: false, dotfiles: 'deny', maxAge: '1h'}),
+  );
 
   app.get('/api/health', (_req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-store');

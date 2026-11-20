@@ -12,7 +12,6 @@ public/
 .env.*
 !.env.example
 
-# Runtime data: uploads and the folder<->UUID mapping are machine-local.
-data/slices/*
-!data/slices/index.json
+# Runtime data: uploads and indexes are machine-local and created on start.
+data/slices/
 data/soundfonts/*.tmp
