@@ -35,6 +35,8 @@ Spuren, Takte) und im Browser gerendert und abgespielt.
   Capella (`.cap`) und alphaTex (`.tex`).
 - **Player:** Noten/TAB, horizontale oder Seitenansicht, Spur-Solo/Mute, Lautstärke,
   Tempo-Regler (25–200 %), Metronom, Einzähler, A-B-Loop, Live-Griffbrett.
+- **Backing-Audio:** Eingebettete GP7/8-Audio-Spuren werden über die in der Datei
+  gespeicherten Sync-Punkte (inkl. Frame-Padding) an der Partitur ausgerichtet.
 - **SoundFonts:** GeneralUser GS, FluidR3, MuseScore General, Sonivox (werden einmalig
   serverseitig zwischengespeichert).
 - **Zwei Wege zum Slice:**
@@ -393,11 +395,18 @@ src/
     FretboardVisualizer.tsx    Live-Griffbrett
     HostingGuide.tsx           In-App-Hostinghilfe
   types/slice.ts               API-Client und Typen
+  lib/midiReload.ts            Koordiniert MIDI-Neuladen ohne Playback-Hänger
+  lib/audioSync.ts             GP-Sync-Punkte: Score-Zeit → Audio-Zeit
   data/demoScores.ts           eingebaute Demo-Partituren
 scores/                        Drop-Ordner
 data/                          Uploads, Index, SoundFont-Cache
 examples/embed-test.html       Iframe-Testseite (/examples/embed-test.html)
 scripts/hash-password.mjs      scrypt-Hash erzeugen
+LICENSE                        Projektlizenz (MPL-2.0)
+THIRD_PARTY_NOTICES.md         Drittanbieter- und SoundFont-Lizenzen
+licenses/alphaTab.txt          alphaTab-Lizenztext (MPL-2.0)
+licenses/Apache-2.0.txt        Apache-2.0-Lizenztext (Sonivox, TypeScript)
+licenses/sonivox.txt           Sonivox-Copyright-Hinweis
 ```
 
 ---
@@ -407,6 +416,7 @@ scripts/hash-password.mjs      scrypt-Hash erzeugen
 ```bash
 npm run dev          # Server + Vite mit HMR
 npm run lint         # TypeScript-Prüfung
+npm test             # Unit-Tests (Node Test Runner + tsx)
 npm run build        # Frontend nach dist/
 npm run start        # Produktionsserver (nutzt dist/)
 ```
@@ -435,11 +445,19 @@ Nützliche URLs:
 
 ## Lizenzen
 
-- [alphaTab](https://alphatab.net) – MPL-2.0
+TabSlice steht unter der **Mozilla Public License 2.0**. Der vollständige Lizenztext
+liegt in [`LICENSE`](./LICENSE).
+
+- [alphaTab](https://alphatab.net) – MPL-2.0 (Lizenztext:
+  [`licenses/alphaTab.txt`](./licenses/alphaTab.txt)); die alphaTab-Attribution in der
+  gerenderten Notation muss sichtbar bleiben.
 - [GeneralUser GS](https://www.schristiancollins.com/generaluser.php) – SoundFont von
   S. Christian Collins
 - Weitere SoundFonts unter den Bedingungen der jeweiligen Projekte (FluidR3, MuseScore
   General, Sonivox)
+
+Alle Drittanbieter-Komponenten und ihre Lizenzen sind in
+[`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) aufgeführt.
 
 Dieses Projekt wurde ursprünglich aus Google AI Studio exportiert. Die AI-Studio-Metadaten
 (`metadata.json`), der Gemini-API-Key und die zugehörigen Hinweise wurden entfernt; die App

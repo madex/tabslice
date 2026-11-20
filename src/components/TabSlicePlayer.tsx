@@ -30,6 +30,8 @@ import {
 } from 'lucide-react';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {DEMO_SCORES} from '../data/demoScores';
+import {AudioSyncPoint, extractAudioSyncPoints, synthTimeToAudioTime} from '../lib/audioSync';
+import {MidiReloadCoordinator} from '../lib/midiReload';
 import {
   CountInModeParam,
   SliceRecord,
@@ -268,6 +270,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
   const audioFileInputRef = useRef<HTMLInputElement>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const apiRef = useRef<alphaTab.AlphaTabApi | null>(null);
+  const midiReloadRef = useRef<MidiReloadCoordinator | null>(null);
   const selectedTrackIndexesRef = useRef<number[]>([0]);
   const repeatRestartTimerRef = useRef<number | null>(null);
 
@@ -289,6 +292,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     solo: false,
     offsetMs: 0,
   });
+  const [embeddedSyncPointCount, setEmbeddedSyncPointCount] = useState<number>(0);
+  const audioSyncPointsRef = useRef<AudioSyncPoint[]>([]);
 
   // SoundFont & playback state
   const [activeSoundFont, setActiveSoundFont] = useState<SoundFontId>(() =>
@@ -431,25 +436,39 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     };
   }, [audioTrack.url]);
 
-  const syncAudioTrackToTime = useCallback((timeMs: number, shouldPlay: boolean) => {
-    const audio = audioElRef.current;
-    const track = audioTrackRef.current;
-    if (!audio || !track.url) return;
+  const syncAudioTrackToTime = useCallback(
+    (timeMs: number, shouldPlay: boolean, songEndMs: number) => {
+      const audio = audioElRef.current;
+      const track = audioTrackRef.current;
+      if (!audio || !track.url) return;
 
-    const targetSec = Math.max(0, (timeMs + track.offsetMs) / 1000);
-    if (Math.abs(audio.currentTime - targetSec) > 0.14) {
-      try {
-        audio.currentTime = targetSec;
-      } catch {
-        // Ignore seek before metadata loaded
+      // Embedded Guitar Pro backing tracks carry sync points that map the score
+      // timeline to the audio file. Custom audio tracks play 1:1.
+      let audioTimeMs = timeMs;
+      if (track.source === 'embedded' && audioSyncPointsRef.current.length > 0) {
+        audioTimeMs = synthTimeToAudioTime(timeMs, audioSyncPointsRef.current, {
+          speed: speedRef.current,
+          songEndTime: songEndMs * speedRef.current,
+          audioDuration: Number.isFinite(audio.duration) ? audio.duration * 1000 : 0,
+        });
       }
-    }
-    if (shouldPlay && audio.paused) {
-      audio.play().catch(() => {});
-    } else if (!shouldPlay && !audio.paused) {
-      audio.pause();
-    }
-  }, []);
+
+      const targetSec = Math.max(0, (audioTimeMs + track.offsetMs) / 1000);
+      if (Math.abs(audio.currentTime - targetSec) > 0.14) {
+        try {
+          audio.currentTime = targetSec;
+        } catch {
+          // Ignore seek before metadata loaded
+        }
+      }
+      if (shouldPlay && audio.paused) {
+        audio.play().catch(() => {});
+      } else if (!shouldPlay && !audio.paused) {
+        audio.pause();
+      }
+    },
+    [],
+  );
 
   const syncSynthLoopAndCountIn = useCallback((loopEnabled: boolean, mode: CountInMode) => {
     const api = apiRef.current;
@@ -475,6 +494,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       const api = apiRef.current;
       if (!api) return;
       clearPendingRepeatRestart();
+      midiReloadRef.current?.cancel();
       audioElRef.current?.pause();
       setErrorBanner(null);
       setIsLoadingScore(true);
@@ -524,6 +544,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       const api = apiRef.current;
       if (!api) return;
       clearPendingRepeatRestart();
+      midiReloadRef.current?.cancel();
       audioElRef.current?.pause();
       setErrorBanner(null);
       setIsLoadingScore(true);
@@ -592,6 +613,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
 
     const api = new alphaTab.AlphaTabApi(mountEl, settings);
     apiRef.current = api;
+    const midiReload = new MidiReloadCoordinator(api);
+    midiReloadRef.current = midiReload;
 
     api.soundFontLoad.on((e) => {
       if (e.total > 0) {
@@ -620,6 +643,13 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       setActiveFretNotes([]);
 
       // Detect embedded Guitar Pro 7/8 audio backing track and expose it as its own Audio-Spur!
+      // The sync points stored in the GP file map the score timeline to the audio file.
+      const syncPoints = extractAudioSyncPoints(loadedScore, (s) =>
+        alphaTab.midi.MidiFileGenerator.generateSyncPoints(s),
+      );
+      audioSyncPointsRef.current = syncPoints;
+      setEmbeddedSyncPointCount(syncPoints.length);
+
       const rawAudio = loadedScore.backingTrack?.rawAudioFile;
       if (rawAudio && rawAudio.length > 0) {
         const copy = new Uint8Array(rawAudio.byteLength);
@@ -689,7 +719,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
 
       // Keep synchronized Audio-Spur tightly locked to alphaTab playback timeline!
       const playing = apiRef.current?.playerState === 1;
-      syncAudioTrackToTime(e.currentTime, playing);
+      syncAudioTrackToTime(e.currentTime, playing, e.endTime);
     });
 
     api.playbackRangeChanged.on((e) => {
@@ -798,6 +828,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     return () => {
       clearPendingRepeatRestart();
       audioElRef.current?.pause();
+      midiReloadRef.current?.dispose();
+      midiReloadRef.current = null;
       api.destroy();
       apiRef.current = null;
     };
@@ -905,11 +937,16 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
           if (isPlaying) {
             manualStopRef.current = true;
             clearPendingRepeatRestart();
+            midiReloadRef.current?.cancelResume();
             audioElRef.current?.pause();
             api.pause();
           } else {
             manualStopRef.current = false;
-            api.play();
+            if (midiReloadRef.current?.isReloading) {
+              midiReloadRef.current.resumeOnLoad();
+            } else {
+              api.play();
+            }
           }
         }
       } else if (e.key === 'Escape') {
@@ -960,10 +997,15 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     if (isPlaying) {
       manualStopRef.current = true;
       clearPendingRepeatRestart();
+      midiReloadRef.current?.cancelResume();
       audioElRef.current?.pause();
       api.pause();
     } else {
       manualStopRef.current = false;
+      if (midiReloadRef.current?.isReloading) {
+        midiReloadRef.current.resumeOnLoad();
+        return;
+      }
       api.countInVolume = countInMode === 'off' ? 0 : 1;
       api.play();
     }
@@ -972,6 +1014,10 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
   const handleStop = () => {
     manualStopRef.current = true;
     clearPendingRepeatRestart();
+    if (midiReloadRef.current?.isReloading) {
+      midiReloadRef.current.cancelResume();
+      midiReloadRef.current.request({tick: 0, resumePlayback: false});
+    }
     if (audioElRef.current) {
       audioElRef.current.pause();
       audioElRef.current.currentTime = 0;
@@ -1277,12 +1323,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
   const handleTrackProgramChange = (track: alphaTab.model.Track, newProgram: number) => {
     const api = apiRef.current;
     if (!api) return;
-    const wasPlaying = isPlaying;
-    const savedTick = api.tickPosition;
+
     track.playbackInfo.program = newProgram;
-    api.loadMidiForScore();
-    api.tickPosition = savedTick;
-    if (wasPlaying) api.play();
     setMixerState((prev) => ({
       ...prev,
       [track.index]: {
@@ -1296,6 +1338,14 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         program: newProgram,
       },
     }));
+
+    // Changing the program requires a new MIDI file. Reloading it stops the
+    // player, so let the coordinator wait for `midiLoaded` before seeking back
+    // and resuming – calling play() immediately would leave playback stuck.
+    midiReloadRef.current?.request({
+      tick: api.tickPosition,
+      resumePlayback: api.playerState === 1,
+    });
   };
 
   // Display settings handlers
@@ -1382,7 +1432,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const nextMs = Math.round(ratio * endTimeMs);
     api.timePosition = nextMs;
-    syncAudioTrackToTime(nextMs, isPlaying);
+    syncAudioTrackToTime(nextMs, isPlaying, endTimeMs);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1854,6 +1904,14 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
                     <span className="text-xs font-semibold text-zinc-100 truncate">
                       {audioTrack.url ? audioTrack.name : 'Audio-Spur (Backing-Track)'}
                     </span>
+                    {audioTrack.source === 'embedded' && embeddedSyncPointCount > 0 && (
+                      <span
+                        className="text-[9px] font-mono px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300 shrink-0"
+                        title={`${embeddedSyncPointCount} Synchronpunkte aus der Guitar-Pro-Datei werden zur Ausrichtung verwendet`}
+                      >
+                        GP-Sync
+                      </span>
+                    )}
                   </div>
                   {audioTrack.url ? (
                     <div className="flex items-center gap-1 shrink-0">

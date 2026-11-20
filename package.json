@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "Interaktiver Guitar-Pro- und alphaTab-Notenplayer mit Live-Griffbrett, Spurmixer, A-B-Loop und Iframe-Einbettung.",
+  "license": "MPL-2.0",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -13,6 +14,7 @@
     "build": "vite build",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "test": "node --import tsx --test src/lib/midiReload.test.ts src/lib/audioSync.test.ts",
     "hash-password": "node scripts/hash-password.mjs"
   },
   "dependencies": {
