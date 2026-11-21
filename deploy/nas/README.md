@@ -89,7 +89,8 @@ docker compose -f deploy/nas/docker-compose.yml logs -f tabslice
 Der erste Build lädt `node:22-alpine` und installiert die npm-Pakete; das dauert auf dem
 NAS einige Minuten. Danach:
 
-- lokal: <http://192.168.178.58:3001>
+- lokal: <http://192.168.178.58:3001> (nur Player-Test; der Admin-Login verlangt wegen
+  `COOKIE_SECURE=1` HTTPS und funktioniert über die öffentliche URL)
 - Healthcheck: <http://192.168.178.58:3001/api/health>
 - extern: <https://tabslice.exposed-to-reality.de>
 - Admin: <https://tabslice.exposed-to-reality.de/admin>
