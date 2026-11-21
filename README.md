@@ -372,6 +372,24 @@ Wichtig:
 
 - Backup: einfach `data/` und `scores/` sichern. Die Container selbst sind zustandslos.
 
+### Variante D: NAS mit Traefik
+
+Für den Betrieb auf einem NAS mit vorhandenem Traefik (z. B. `exposed-to-reality.de`)
+liegt ein eigener Compose-Stack bei, der den Container per Labels in ein externes
+Docker-Netz einhängt:
+
+```bash
+git clone https://github.com/madex/tabslice.git /srv/data/rest/tabslice
+cd /srv/data/rest/tabslice
+# .env mit ADMIN_PASSWORD anlegen, data/ und scores/ auf UID 1000 setzen
+docker compose -f deploy/nas/docker-compose.yml up -d --build
+```
+
+Voraussetzungen: Traefik läuft mit dem externen Netz `docker_web`, ein CNAME zeigt auf
+das NAS, und Port 80/443 sind freigeschaltet. Schritt-für-Schritt-Anleitung inklusive
+DNS, Rechten, Updates und Fehlersuche:
+[`deploy/nas/README.md`](./deploy/nas/README.md).
+
 ### nginx davor
 
 ```nginx
@@ -445,6 +463,7 @@ server.ts                      Express-API, Auth, UUIDs, alphaTab-Metadaten
 Dockerfile                     Multi-Stage-Build für den Produktionsbetrieb
 docker-compose.yml             Container mit Port, Env und persistenten Volumes
 .dockerignore                  Hält node_modules, data/ und scores/ aus dem Image
+deploy/nas/                    Compose-Stack und Anleitung für NAS + Traefik
 src/
   App.tsx                      Routing, Admin-Session, Ansichten
   components/

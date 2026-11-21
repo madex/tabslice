@@ -1,0 +1,55 @@
+# TabSlice auf dem NAS2 (Debian + Docker + Traefik)
+#
+# Diesen Stack aus dem Repository-Wurzelverzeichnis starten:
+#   docker compose -f deploy/nas/docker-compose.yml up -d --build
+#
+# Voraussetzungen:
+#   - Der zentrale Traefik-Stack laeuft (/srv/data/docker/docker-compose.yml)
+#     und hat das externe Docker-Netz "docker_web" angelegt.
+#   - Ein CNAME tabslice.exposed-to-reality.de -> nas2.bqmsk4l2qhgb39un.myfritz.net
+#     zeigt auf dieses NAS, Port 80/443 sind in der FritzBox freigegeben.
+#   - ../../.env existiert (ADMIN_PASSWORD bzw. ADMIN_PASSWORD_HASH).
+#
+# Details: deploy/nas/README.md
+
+services:
+  tabslice:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: tabslice:latest
+    container_name: tabslice
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ../../.env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      # Traefik steht davor: echte Client-IP fuer Rate-Limits und Secure-Cookies.
+      TRUST_PROXY: "1"
+      COOKIE_SECURE: "1"
+    ports:
+      # Lokaler Testzugang ohne Traefik. Gitea belegt bereits Host-Port 3000.
+      - "3001:3000"
+    volumes:
+      # Uploads, Index und SoundFont-Cache.
+      - ../../data:/app/data
+      # Drop-Ordner fuer Partituren (per SMB/FTP beschreibbar).
+      - ../../scores:/app/scores
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.tabslice.rule=Host(`${TABSLICE_HOST:-tabslice.exposed-to-reality.de}`)
+      - traefik.http.routers.tabslice.entrypoints=websecure
+      - traefik.http.routers.tabslice.tls.certresolver=letsencrypt
+      - traefik.http.services.tabslice.loadbalancer.server.port=3000
+      # Traefik haengt nur am Netz des zentralen Stacks.
+      - traefik.docker.network=docker_web
+
+networks:
+  web:
+    external: true
+    name: docker_web
