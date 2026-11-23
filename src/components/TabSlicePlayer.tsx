@@ -31,6 +31,7 @@ import {
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {DEMO_SCORES} from '../data/demoScores';
 import {AudioSyncPoint, extractAudioSyncPoints, synthTimeToAudioTime} from '../lib/audioSync';
+import {disableIosPlaybackAudio, enableIosPlaybackAudio, isIosLike} from '../lib/iosAudio';
 import {MidiReloadCoordinator} from '../lib/midiReload';
 import {
   CountInModeParam,
@@ -109,30 +110,37 @@ const SOUNDFONT_OPTIONS: Array<{
   name: string;
   hint: string;
   url: string;
+  fallbackUrl?: string;
 }> = [
   {
     id: 'generaluser',
     name: 'GeneralUser GS 2.0.3',
-    hint: 'Standard · 30,8 MB',
-    url: '/api/soundfonts/generaluser',
+    hint: 'Standard · 30,8 MB · CDN',
+    // Fastly-backed GitHub raw; CORS enabled, so the browser loads it directly
+    // instead of streaming 30 MB through the NAS.
+    url: 'https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2',
+    fallbackUrl: '/api/soundfonts/generaluser',
   },
   {
     id: 'fluidr3',
     name: 'FluidR3 GM (Studio)',
-    hint: 'Alternative · 22 MB',
-    url: '/api/soundfonts/fluidr3',
+    hint: 'Alternative · 22 MB · CDN',
+    url: 'https://raw.githubusercontent.com/musescore/MuseScore/v3.6.2/share/sound/FluidR3Mono_GM.sf3',
+    fallbackUrl: '/api/soundfonts/fluidr3',
   },
   {
     id: 'musescore',
     name: 'MuseScore General HD',
-    hint: 'Konzert · 38 MB',
-    url: '/api/soundfonts/musescore',
+    hint: 'Konzert · 38 MB · CDN',
+    url: 'https://huggingface.co/MuScriptor/assets/resolve/main/MuseScore_General.sf3',
+    fallbackUrl: '/api/soundfonts/musescore',
   },
   {
     id: 'sonivox',
     name: 'Sonivox Kompakt',
-    hint: 'Schnell · 1,3 MB',
-    url: `${import.meta.env.BASE_URL}soundfont/sonivox.sf2`,
+    hint: 'Schnell · 1,3 MB · CDN',
+    url: 'https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.9.0/dist/soundfont/sonivox.sf2',
+    fallbackUrl: `${import.meta.env.BASE_URL}soundfont/sonivox.sf2`,
   },
 ];
 
@@ -174,12 +182,19 @@ function getInitialSoundFont(paramSf?: SoundFontPresetId): SoundFontId {
   } catch {
     // Ignore restricted iframe storage
   }
-  return 'generaluser';
+  // iPhones/iPads have less memory and slower networks; the compact 1.3 MB
+  // Sonivox bank starts playing almost instantly there.
+  return isIosLike() ? 'sonivox' : 'generaluser';
 }
 
 function getSoundFontUrl(id: SoundFontId): string {
   const found = SOUNDFONT_OPTIONS.find((opt) => opt.id === id);
   return found ? found.url : SOUNDFONT_OPTIONS[0].url;
+}
+
+function getSoundFontFallbackUrl(id: SoundFontId): string | null {
+  if (id === 'custom') return null;
+  return SOUNDFONT_OPTIONS.find((opt) => opt.id === id)?.fallbackUrl ?? null;
 }
 
 function getSoundFontLabel(id: SoundFontId, customName: string | null): string {
@@ -302,6 +317,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
   const [customSoundFontName, setCustomSoundFontName] = useState<string | null>(null);
   const [soundFontProgress, setSoundFontProgress] = useState<number>(0);
   const [isSwitchingSoundFont, setIsSwitchingSoundFont] = useState<boolean>(false);
+  const activeSoundFontRef = useRef<SoundFontId>(activeSoundFont);
+  const soundFontFallbackTriedRef = useRef<boolean>(false);
   const [isPlayerReady, setIsPlayerReady] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTimeMs, setCurrentTimeMs] = useState<number>(0);
@@ -627,6 +644,25 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       setIsSwitchingSoundFont(false);
     });
 
+    api.player?.soundFontLoadFailed.on((err: Error) => {
+      // A CDN can be blocked (corporate network, outage, CORS proxy). Retry the
+      // same bank from the local server cache once before giving up.
+      const sfId = activeSoundFontRef.current;
+      const fallbackUrl = getSoundFontFallbackUrl(sfId);
+      if (fallbackUrl && !soundFontFallbackTriedRef.current) {
+        soundFontFallbackTriedRef.current = true;
+        setSoundFontProgress(0);
+        setIsSwitchingSoundFont(true);
+        setErrorBanner(null);
+        api.loadSoundFont(fallbackUrl, false);
+        return;
+      }
+      setIsSwitchingSoundFont(false);
+      setErrorBanner(
+        `SoundFont konnte nicht geladen werden${err?.message ? ` (${err.message})` : ''}.`,
+      );
+    });
+
     api.playerReady.on(() => {
       setIsPlayerReady(true);
       api.playbackSpeed = Math.min(2, Math.max(0.25, initialSpeed));
@@ -832,6 +868,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       midiReloadRef.current = null;
       api.destroy();
       apiRef.current = null;
+      disableIosPlaybackAudio();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -945,6 +982,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
             if (midiReloadRef.current?.isReloading) {
               midiReloadRef.current.resumeOnLoad();
             } else {
+              enableIosPlaybackAudio();
               api.play();
             }
           }
@@ -1006,6 +1044,9 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         midiReloadRef.current.resumeOnLoad();
         return;
       }
+      // Safari/iOS mutes Web Audio with the hardware silent switch unless the
+      // page claims the "playback" audio session. Do it inside the tap gesture.
+      enableIosPlaybackAudio();
       api.countInVolume = countInMode === 'off' ? 0 : 1;
       api.play();
     }
@@ -1094,6 +1135,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     const api = apiRef.current;
     if (!api) return;
     setActiveSoundFont(sfId);
+    activeSoundFontRef.current = sfId;
+    soundFontFallbackTriedRef.current = false;
     setCustomSoundFontName(null);
     setIsSwitchingSoundFont(true);
     setSoundFontProgress(0);
@@ -1116,6 +1159,8 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
     reader.onload = () => {
       if (reader.result instanceof ArrayBuffer) {
         setActiveSoundFont('custom');
+        activeSoundFontRef.current = 'custom';
+        soundFontFallbackTriedRef.current = true;
         setCustomSoundFontName(file.name);
         api.loadSoundFont(new Uint8Array(reader.result), false);
       }
