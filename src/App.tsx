@@ -58,7 +58,13 @@ function parseRouteConfig(): RouteConfig {
   const headerParam = params.get('header') ?? params.get('title');
   const showHeader = headerParam !== '0' && headerParam !== 'false';
 
-  const layout = params.get('layout') === 'horizontal' ? 'horizontal' : 'page';
+  const layoutParam = params.get('layout');
+  // A phone cannot show a page-wide score legibly; fall back to the
+  // single-strip (horizontal) layout below 640px unless the URL says otherwise.
+  const narrowViewport =
+    typeof window !== 'undefined' && window.innerWidth > 0 && window.innerWidth < 640;
+  const layout: 'page' | 'horizontal' =
+    layoutParam === 'horizontal' || (!layoutParam && narrowViewport) ? 'horizontal' : 'page';
 
   const staveParam = params.get('stave');
   const stave: StaveModeParam =
@@ -295,7 +301,7 @@ export default function App() {
       : activeSlice?.showFretboard || routeConfig.fretboard;
 
     return (
-      <main className="w-screen h-screen overflow-hidden bg-white">
+      <main className="w-screen h-[100dvh] overflow-hidden bg-white">
         <TabSlicePlayer
           isEmbedMode
           activeSlice={activeSlice}
@@ -317,7 +323,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-[#F4F5F7] text-zinc-900 overflow-hidden">
+    <div className="h-[100dvh] flex flex-col bg-[#F4F5F7] text-zinc-900 overflow-hidden">
       {/* Strict 3-Zone Top Bar: [Brand wordmark] — [4 concise nav links] — [1 Primary CTA] */}
       <header className="h-14 px-6 bg-white border-b border-zinc-200 flex items-center justify-between gap-8 shrink-0">
         <a

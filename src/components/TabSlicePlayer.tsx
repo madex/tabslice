@@ -1909,7 +1909,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
       )}
 
       {/* Soundslice-Inspired Dark Bottom Transport & Practice Dock */}
-      <div className="relative bg-[#14161A] text-zinc-100 border-t border-white/10 shrink-0 select-none">
+      <div className="relative bg-[#14161A] text-zinc-100 border-t border-white/10 shrink-0 select-none pb-[env(safe-area-inset-bottom)]">
         {/* Popover: Tracks, Mixer, Dedicated Audio-Spur & Metronome Channel */}
         {activePopover === 'tracks' && score && (
           <div
@@ -2782,7 +2782,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
         </div>
 
         {/* Main Transport Controls Row */}
-        <div className="flex items-center justify-between gap-2 px-3 sm:px-4 h-14">
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 sm:px-4 py-1.5 min-h-14">
           {/* Left: Play/Pause, Stop, Loop, Timecode */}
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
             <button
@@ -2860,7 +2860,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
           </div>
 
           {/* Right: BPM & Tempo-Trainer, Metronome, Count-In, Volume, Fretboard, Mixer, Settings, Fullscreen */}
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          <div className="flex items-center gap-0.5 sm:gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => setActivePopover((prev) => (prev === 'speed' ? null : 'speed'))}
@@ -2988,7 +2988,7 @@ export const TabSlicePlayer: React.FC<TabSlicePlayerProps> = ({
             <button
               type="button"
               onClick={handleToggleFullscreen}
-              className="w-9 h-9 rounded-lg flex items-center justify-center text-zinc-300 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+              className="w-9 h-9 rounded-lg hidden sm:flex items-center justify-center text-zinc-300 hover:text-white hover:bg-white/10 transition-colors shrink-0"
               title={isFullscreen ? 'Vollbild verlassen' : 'Vollbild'}
               aria-label="Vollbild umschalten"
             >
